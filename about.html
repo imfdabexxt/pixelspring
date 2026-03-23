@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="About Pixel Spring: a marketing agency focused on building structured marketing systems for service businesses."
+    />
+    <title>About — Pixel Spring</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,0,0&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial;
+      }
+    </style>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <div class="nav-wrap">
+      <nav class="nav" aria-label="Primary">
+        <a class="brand" href="./index.html">
+          <span class="logo" aria-hidden="true"></span>
+          <span>Pixel Spring</span>
+        </a>
+
+        <div class="nav-links" role="navigation" aria-label="Site">
+          <a data-nav="true" href="./index.html">Home</a>
+          <a data-nav="true" href="./services.html">Services</a>
+          <a data-nav="true" href="./case-studies.html">Case Studies</a>
+          <a data-nav="true" href="./about.html">About</a>
+          <a data-nav="true" href="./contact.html">Contact</a>
+          <a class="btn accent" href="./contact.html">
+            <span class="ms" aria-hidden="true">calendar_month</span>
+            Book Consultation <span class="arrow" aria-hidden="true">→</span>
+          </a>
+        </div>
+
+        <button
+          class="nav-toggle"
+          type="button"
+          aria-label="Open menu"
+          aria-expanded="false"
+          data-mobile-toggle="true"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M4 7h16M4 12h16M4 17h16"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      </nav>
+
+      <div class="mobile-panel" data-mobile-panel="true">
+        <div class="card">
+          <a data-nav="true" href="./index.html">Home</a>
+          <a data-nav="true" href="./services.html">Services</a>
+          <a data-nav="true" href="./case-studies.html">Case Studies</a>
+          <a data-nav="true" href="./about.html">About</a>
+          <a data-nav="true" href="./contact.html">Contact</a>
+          <div class="mobile-actions">
+            <a class="btn accent" href="./contact.html">Book Consultation →</a>
+            <a class="btn secondary" href="./services.html">View Services</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <header class="page-hero section compact">
+      <div class="container">
+        <div class="card reveal">
+          <div class="pill">
+            <span class="dot" aria-hidden="true"></span>
+            About
+          </div>
+          <h1 style="margin-top: 12px">Built for clarity, systems, and long‑term growth</h1>
+          <p style="max-width: 72ch; margin-bottom: 0">
+            Pixel Spring is a marketing agency focused on building structured marketing systems for service businesses.
+            Instead of random marketing tactics, we focus on strategy, systems, and long-term growth.
+          </p>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="container">
+          <div class="grid cards-3">
+            <article class="card glow pad reveal">
+              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">target</span></div>
+              <h3 class="card-title">Our focus</h3>
+              <p>Positioning, visibility, lead flow, and conversion — tied together as one operating system.</p>
+            </article>
+            <article class="card glow pad reveal">
+              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">account_tree</span></div>
+              <h3 class="card-title">Our approach</h3>
+              <p>Repeatable systems you can run consistently — so growth isn’t dependent on luck or spikes.</p>
+            </article>
+            <article class="card glow pad reveal">
+              <div class="icon orange" aria-hidden="true"><span class="ms" aria-hidden="true">workspace_premium</span></div>
+              <h3 class="card-title">Our standard</h3>
+              <p>Premium, minimal execution that builds trust with serious business clients.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section compact">
+        <div class="container">
+          <div class="card pad reveal">
+            <div class="pill">
+              <span class="dot" aria-hidden="true"></span>
+              Mission
+            </div>
+            <h2 style="margin-top: 12px">Help businesses grow through smart marketing systems.</h2>
+            <p style="max-width: 78ch; margin-bottom: 0">
+              The goal isn’t “more marketing.” It’s a clean, structured acquisition system that compounds: visibility first, then funnels,
+              then conversion — so you can scale with confidence.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section cta">
+        <div class="container">
+          <div class="card panel reveal">
+            <div>
+              <h2>Want the system built for your business?</h2>
+              <p>Book a consultation and we’ll map a clear 90-day growth plan.</p>
+            </div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap">
+              <a class="btn accent" href="./contact.html">
+                <span class="ms" aria-hidden="true">calendar_month</span>
+                Book Consultation <span class="arrow">→</span>
+              </a>
+              <a class="btn secondary" href="./services.html">
+                <span class="ms" aria-hidden="true">view_module</span>
+                View Services
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container">
+        <div class="footer-grid">
+          <div>
+            <a class="brand" href="./index.html">
+              <span class="logo" aria-hidden="true"></span>
+              <span>Pixel Spring</span>
+            </a>
+            <p style="margin-top: 10px; margin-bottom: 0">
+              Premium marketing systems for service businesses. Visibility, lead generation, and consistent clients — built with structure.
+            </p>
+            <small>© <span id="year"></span> Pixel Spring. All rights reserved.</small>
+          </div>
+          <div class="footer-links" aria-label="Footer">
+            <a href="./services.html">Services</a>
+            <a href="./case-studies.html">Case Studies</a>
+            <a href="./about.html">About</a>
+            <a href="./contact.html">Contact</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="./assets/main.js"></script>
+    <script>
+      document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>
+
