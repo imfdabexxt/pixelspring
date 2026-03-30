@@ -41,6 +41,14 @@
         <div class="nav-links" role="navigation" aria-label="Site">
           <a data-nav="true" href="#home"><img class="i8" src="https://img.icons8.com/material-rounded/18/home.png" alt="" />Home</a>
           <a data-nav="true" href="#services"><img class="i8" src="https://img.icons8.com/material-rounded/18/services.png" alt="" />Services</a>
+          <a class="nav-offer" data-nav="true" href="#special-offers"
+            ><img class="i8" src="https://img.icons8.com/material-rounded/18/price-tag-usd.png" alt="" />Special
+            Offers <span class="nav-badge" aria-label="5 offers">5</span></a
+          >
+          <button class="btn secondary nav-menu-btn" type="button" data-open-menu="true">
+            <img class="i8" src="https://img.icons8.com/material-rounded/18/menu--v1.png" alt="" />
+            See our menu
+          </button>
           <a data-nav="true" href="#case-studies"><img class="i8" src="https://img.icons8.com/material-rounded/18/combo-chart--v1.png" alt="" />Case Studies</a>
           <a data-nav="true" href="#about"><img class="i8" src="https://img.icons8.com/material-rounded/18/info.png" alt="" />About</a>
           <a data-nav="true" href="#contact"><img class="i8" src="https://img.icons8.com/material-rounded/18/new-post.png" alt="" />Contact</a>
@@ -72,6 +80,12 @@
         <div class="card">
           <a data-nav="true" href="#home">Home</a>
           <a data-nav="true" href="#services">Services</a>
+          <a class="nav-offer" data-nav="true" href="#special-offers"
+            >Special Offers <span class="nav-badge" aria-label="5 offers">5</span></a
+          >
+          <button class="btn secondary" type="button" data-open-menu="true" style="width: 100%; justify-content: flex-start">
+            See our menu
+          </button>
           <a data-nav="true" href="#case-studies">Case Studies</a>
           <a data-nav="true" href="#about">About</a>
           <a data-nav="true" href="#contact">Contact</a>
@@ -135,22 +149,28 @@
             <div class="person-panel">
               <div class="chart-card c1">
                 <strong>Market Sales</strong>
-                <div class="linear-bars">
-                  <div class="lb-row">
-                    <span class="lb-label">Local SEO</span>
-                    <span class="lb-track"><span class="lb-fill" data-auto-fill="82"></span></span>
+                <div class="axis-chart" data-axis-chart="true">
+                  <div class="axis y" aria-hidden="true">
+                    <span>100</span><span>75</span><span>50</span><span>25</span><span>0</span>
                   </div>
-                  <div class="lb-row">
-                    <span class="lb-label">Paid Reach</span>
-                    <span class="lb-track"><span class="lb-fill" data-auto-fill="64"></span></span>
+                  <div class="axis x" aria-hidden="true">
+                    <span>W1</span><span>W2</span><span>W3</span><span>W4</span><span>W5</span>
                   </div>
-                  <div class="lb-row">
-                    <span class="lb-label">Funnel CTR</span>
-                    <span class="lb-track"><span class="lb-fill" data-auto-fill="73"></span></span>
-                  </div>
-                  <div class="lb-row">
-                    <span class="lb-label">Booked Calls</span>
-                    <span class="lb-track"><span class="lb-fill" data-auto-fill="88"></span></span>
+
+                  <div class="plot" aria-hidden="true">
+                    <span class="bar b1" style="--v: 28"></span>
+                    <span class="bar b2" style="--v: 44"></span>
+                    <span class="bar b3" style="--v: 56"></span>
+                    <span class="bar b4" style="--v: 71"></span>
+                    <span class="bar b5" style="--v: 84"></span>
+                    <svg class="trend" viewBox="0 0 100 60" preserveAspectRatio="none">
+                      <polyline class="trend-line" points="6,48 28,38 50,30 72,18 94,10" />
+                      <circle class="pt" cx="6" cy="48" r="1.9" />
+                      <circle class="pt" cx="28" cy="38" r="1.9" />
+                      <circle class="pt" cx="50" cy="30" r="1.9" />
+                      <circle class="pt" cx="72" cy="18" r="1.9" />
+                      <circle class="pt" cx="94" cy="10" r="1.9" />
+                    </svg>
                   </div>
                 </div>
               </div>
@@ -236,50 +256,188 @@
 
       <section class="section compact" id="services" data-section="services">
         <div class="container">
-          <div class="section-head reveal">
-            <div>
-              <h2 id="why">Why Most Businesses Struggle With Marketing</h2>
-              <p id="whydes">Marketing performance declines when efforts are fragmented, reactive, and unsupported by a clear strategic framework.
-                 Many businesses operate without defined positioning, structured acquisition systems,
-                 or measurable performance benchmarks, resulting in inconsistent visibility, low-quality leads, and poor conversion outcomes.</p>
-                 <br><br>
-                 <p>Sustainable growth is achieved through precise market positioning, well-defined customer journeys, repeatable lead generation systems,
-                   and disciplined, data-driven execution. When strategy, systems,
-                   and performance tracking are aligned, marketing becomes predictable, scalable, and consistently profitable.</p><br><br>
+          <div class="problem-hero reveal">
+            <div class="problem-copy">
+              <div class="pill">
+                <span class="dot" aria-hidden="true"></span>
+                The real reason marketing feels “random”
+              </div>
+              <h2 id="why" style="margin-top: 14px">Why Most Businesses Struggle With Marketing</h2>
+              <p id="whydes">
+                Marketing breaks when efforts are fragmented, reactive, and unsupported by a clear strategy. Most businesses
+                don’t have a defined customer journey, a repeatable acquisition system, or simple performance benchmarks 
+                so visibility and leads fluctuate.
+              </p>
+
+              <div class="problem-bullets">
+                <div class="pb">
+                  <span class="ms">check_circle</span>
+                  <div>
+                    <strong>Unclear positioning</strong>
+                    <span>Customers don’t instantly understand why you’re the best choice.</span>
+                  </div>
+                </div>
+                <div class="pb">
+                  <span class="ms">check_circle</span>
+                  <div>
+                    <strong>No system for leads</strong>
+                    <span>No consistent pipeline from attention → inquiry → booked client.</span>
+                  </div>
+                </div>
+                <div class="pb">
+                  <span class="ms">check_circle</span>
+                  <div>
+                    <strong>Weak follow‑up</strong>
+                    <span>Slow responses and missed steps reduce conversion drastically.</span>
+                  </div>
+                </div>
+                <div class="pb">
+                  <span class="ms">check_circle</span>
+                  <div>
+                    <strong>No measurement</strong>
+                    <span>Without tracking, decisions become guesswork and spend gets wasted.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="problem-media" aria-hidden="true">
+              <img
+                src="https://plus.unsplash.com/premium_photo-1770375761484-ad322deba414?auto=format&fit=crop&w=1400&q=70"
+                alt=""
+                loading="lazy"
+              />
+              <div class="problem-overlay-card">
+                <div class="k">Fix the system</div>
+                <div class="v">Visibility → Funnel → Follow‑up → Conversion</div>
+              </div>
             </div>
           </div>
 
-          <div class="grid cards-4">
+          <div class="grid cards-4" style="margin-top: 22px">
             <article class="card pad reveal">
-              <div class="icon" aria-hidden="true">
-                <span class="ms" aria-hidden="true">visibility</span>
-              </div>
+              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">visibility</span></div>
               <h3 class="card-title">Low Online Visibility</h3>
-              <p>Customers can't find you consistently across search, maps, and social.</p>
+              <p>Customers can’t find you consistently across search, maps, and social.</p>
             </article>
-
             <article class="card pad reveal">
-              <div class="icon" aria-hidden="true">
-                <span class="ms" aria-hidden="true">shuffle</span>
-              </div>
+              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">shuffle</span></div>
               <h3 class="card-title">Random Marketing Efforts</h3>
-              <p>Posting and ads without strategy creates motion not momentum.</p>
+              <p>Posting and ads without strategy creates motion  not momentum.</p>
             </article>
-
             <article class="card pad reveal">
-              <div class="icon orange" aria-hidden="true">
-                <span class="ms" aria-hidden="true">account_tree</span>
-              </div>
+              <div class="icon orange" aria-hidden="true"><span class="ms" aria-hidden="true">account_tree</span></div>
               <h3 class="card-title">No Client Acquisition System</h3>
               <p>No clear path from attention → lead → booked client.</p>
             </article>
-
             <article class="card pad reveal">
-              <div class="icon" aria-hidden="true">
-                <span class="ms" aria-hidden="true">show_chart</span>
-              </div>
+              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">show_chart</span></div>
               <h3 class="card-title">Inconsistent Lead Flow</h3>
               <p>Unstable pipelines make staffing, cash flow, and growth feel uncertain.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section offers-section" id="special-offers" data-section="special-offers">
+        <div class="container">
+          <div class="offers-head reveal">
+            <div class="pill" style="background: rgba(255, 0, 0, 0.09); border-color: rgba(255, 0, 0, 0.22)">
+              <span class="dot" aria-hidden="true" style="background: #ff2d2d; box-shadow: 0 0 0 4px rgba(255,45,45,.14), 0 0 26px rgba(255,45,45,.18)"></span>
+              Special Offers
+            </div>
+            <h2 style="margin-top: 12px">Quick Business solution, High‑value packages (RWF)</h2>
+            <p style="max-width: 70ch; margin-bottom: 0">
+              Transparent pricing designed to help service businesses start fast and scale with systems.
+            </p>
+            <div class="offer-countdown card reveal" data-offer-countdown="true" aria-label="Offer countdown timer">
+              <div class="oc-top">
+                <div class="oc-title">
+                  <span class="ms" aria-hidden="true">schedule</span>
+                  Get them at the right price before demand increases
+                </div>
+                <div class="oc-badge">Live</div>
+              </div>
+
+              <div class="oc-grid" aria-hidden="true">
+                <div class="oc-box">
+                  <div class="oc-num" data-oc="days">06</div>
+                  <div class="oc-label">Days</div>
+                </div>
+                <div class="oc-sep">:</div>
+                <div class="oc-box">
+                  <div class="oc-num" data-oc="hours">03</div>
+                  <div class="oc-label">Hours</div>
+                </div>
+                <div class="oc-sep">:</div>
+                <div class="oc-box">
+                  <div class="oc-num" data-oc="minutes">38</div>
+                  <div class="oc-label">Minutes</div>
+                </div>
+                <div class="oc-sep">:</div>
+                <div class="oc-box">
+                  <div class="oc-num" data-oc="seconds">00</div>
+                  <div class="oc-label">Seconds</div>
+                </div>
+              </div>
+
+              <small class="oc-sub"> pricing is always shown, but the timer keeps it time-sensitive.</small>
+            </div>
+            <br>
+          </div>
+
+          <div class="grid offers-grid">
+            <article class="card pad reveal offer-card">
+              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
+                <span class="ms">hub</span>
+              </div>
+              <h3 class="card-title">Client Management System</h3>
+              <p>We offer client Client management system from <strong>100,000 RWF</strong> – <strong>500,000 RWF</strong> depending on the system load.</p>
+            </article>
+
+            <article class="card pad reveal offer-card">
+              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
+                <span class="ms">language</span>
+              </div>
+              <h3 class="card-title">Business Website</h3>
+              <p>Professional website from <strong>150,000 RWF</strong> to <strong>250,000 RWF</strong>.</p>
+            </article>
+
+            <article class="card pad reveal offer-card">
+              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
+                <span class="ms">storefront</span>
+              </div>
+              <h3 class="card-title">Online Store</h3>
+              <p>Online store only for <strong>95,000 RWF</strong>.</p>
+            </article>
+
+            <article class="card pad reveal offer-card">
+              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
+                <span class="ms">visibility</span>
+              </div>
+              <h3 class="card-title">Visibility Pack</h3>
+              <p>Visibility pack only (separately) for <strong>150,000 RWF</strong>.</p>
+            </article>
+
+            <article class="card pad reveal offer-card">
+              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
+                <span class="ms">search</span>
+              </div>
+              <h3 class="card-title">Search Engine Optimization</h3>
+              <p>Search engine optimization for <strong>200,000 RWF</strong>.</p>
+            </article>
+
+            <article class="card glow pad reveal offer-card" style="grid-column: 1 / -1">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+                <div>
+                  <h3 style="margin: 0 0 6px">Want the right package?</h3>
+                  <p style="margin: 0">Message us and we’ll recommend the best offer for your business.</p>
+                </div>
+                <a class="btn accent" href="https://wa.me/250788700526">
+                  <img class="i8" src="https://img.icons8.com/material-rounded/18/whatsapp.png" alt="" />
+                  WhatsApp Us <span class="arrow">→</span>
+                </a>
+              </div>
             </article>
           </div>
         </div>
@@ -532,6 +690,7 @@ Contact us:<strong> +250 788 700 526 </strong> |<strong> pixelspring1@gmail.com 
           </div>
           <div class="footer-links" aria-label="Footer">
             <a href="#services">Services</a>
+            <a href="#special-offers">Special Offers</a>
             <a href="#case-studies">Case Studies</a>
             <a href="#about">About</a>
             <a href="#contact">Contact</a>
@@ -541,6 +700,23 @@ Contact us:<strong> +250 788 700 526 </strong> |<strong> pixelspring1@gmail.com 
     </footer>
 
     <script src="./assets/main.js"></script>
+    <div class="modal" data-menu-modal="true" aria-hidden="true">
+      <div class="modal-backdrop" data-close-menu="true"></div>
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="Pixel Spring menu">
+        <div class="modal-head">
+          <div class="modal-title">
+            <img class="modal-logo" src="./assets/logo.png" alt="" aria-hidden="true" />
+            Pixel Spring Menu
+          </div>
+          <button class="modal-close" type="button" aria-label="Close menu" data-close-menu="true">
+            <span class="ms" aria-hidden="true">close</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <img class="menu-img" src="./assets/menu.jpg" alt="Pixel Spring pricing menu" />
+        </div>
+      </div>
+    </div>
     <script>
       document.getElementById("year").textContent = new Date().getFullYear();
     </script>

@@ -166,7 +166,7 @@ function initScrollSpy() {
   const io = new IntersectionObserver(
     (entries) => {
       const inView = entries
-        .filter((e) => e.isIntersecting)
+        .filter((e) => e.isIntersecting && e.target && e.target.id)
         .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
       if (!inView || !inView.target.id) return;
       const id = `#${inView.target.id}`;
@@ -180,6 +180,95 @@ function initScrollSpy() {
   sections.forEach((s) => io.observe(s));
 }
 
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function initOffersCountdown() {
+  const root = qs('[data-offer-countdown="true"]');
+  if (!root) return;
+
+  const dEl = qs('[data-oc="days"]', root);
+  const hEl = qs('[data-oc="hours"]', root);
+  const mEl = qs('[data-oc="minutes"]', root);
+  const sEl = qs('[data-oc="seconds"]', root);
+  if (!dEl || !hEl || !mEl || !sEl) return;
+
+  const START = { days: 6, hours: 3, minutes: 38, seconds: 0 };
+  const startTotal =
+    (((START.days * 24 + START.hours) * 60 + START.minutes) * 60 + START.seconds) * 1000;
+
+  const key = "pixel_spring_offer_countdown_end";
+  const now = () => Date.now();
+
+  const getEnd = () => {
+    const stored = Number(localStorage.getItem(key) || "0");
+    if (stored && stored > now() + 1000) return stored;
+    const end = now() + startTotal;
+    localStorage.setItem(key, String(end));
+    return end;
+  };
+
+  let endAt = getEnd();
+
+  const render = (msLeft) => {
+    const sLeft = Math.max(0, Math.floor(msLeft / 1000));
+    const days = Math.floor(sLeft / 86400);
+    const hours = Math.floor((sLeft % 86400) / 3600);
+    const minutes = Math.floor((sLeft % 3600) / 60);
+    const seconds = sLeft % 60;
+    dEl.textContent = pad2(days);
+    hEl.textContent = pad2(hours);
+    mEl.textContent = pad2(minutes);
+    sEl.textContent = pad2(seconds);
+  };
+
+  render(endAt - now());
+
+  setInterval(() => {
+    const left = endAt - now();
+    if (left <= 0) {
+      endAt = now() + startTotal;
+      localStorage.setItem(key, String(endAt));
+      render(startTotal);
+      return;
+    }
+    render(left);
+  }, 1000);
+}
+
+function initMenuModal() {
+  const modal = qs('[data-menu-modal="true"]');
+  if (!modal) return;
+  const panel = qs(".modal-panel", modal);
+  const openers = qsa('[data-open-menu="true"]');
+  const closers = qsa('[data-close-menu="true"]', modal);
+  if (!panel || !openers.length) return;
+
+  const open = () => {
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    const closeBtn = qs('[data-close-menu="true"]', modal);
+    if (closeBtn) closeBtn.focus();
+  };
+
+  const close = () => {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.style.overflow = "";
+  };
+
+  openers.forEach((b) => b.addEventListener("click", open));
+  closers.forEach((c) => c.addEventListener("click", close));
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modal.classList.contains("open")) close();
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setAriaCurrent();
   initMobileNav();
@@ -187,6 +276,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initContactForm();
   initLandingDemo();
   initScrollSpy();
+  initOffersCountdown();
+  initMenuModal();
 });
 
 
