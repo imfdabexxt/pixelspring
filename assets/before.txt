@@ -1,0 +1,1428 @@
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+const Recharts = window.Recharts || window.recharts;
+const ChartFallback = ({ children, style }) => React.createElement("div", { style: style || {} }, children || null);
+const ChartNull = () => null;
+const {
+  PieChart = ChartFallback,
+  Pie = ChartFallback,
+  Cell = ChartNull,
+  BarChart = ChartFallback,
+  Bar = ChartNull,
+  XAxis = ChartNull,
+  YAxis = ChartNull,
+  Tooltip = ChartNull,
+  ResponsiveContainer = ChartFallback,
+  LineChart = ChartFallback,
+  Line = ChartNull,
+  CartesianGrid = ChartNull,
+  Legend = ChartNull,
+  AreaChart = ChartFallback,
+  Area = ChartNull
+} = Recharts || {};
+
+// ─── Utility helpers ───
+const uid = () => Math.random().toString(36).slice(2, 10);
+const today = () => new Date().toISOString().split("T")[0];
+const nowTime = () => {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+};
+const toTimestamp = (dateStr, timeStr) => {
+  try {
+    if (!dateStr) return Date.now();
+    const time = timeStr || "00:00";
+    const dt = new Date(`${dateStr}T${time}:00`);
+    if (isNaN(dt.getTime())) return Date.now();
+    return dt.getTime();
+  } catch (_e) {
+    return Date.now();
+  }
+};
+const fmt = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const moneyFormat = (currency = "RWF") => {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      currencyDisplay: "symbol",
+      maximumFractionDigits: 2,
+    });
+  } catch (_e) {
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+  }
+};
+const fmtCur = (n, currency) => {
+  try {
+    const c = (currency ?? (typeof window !== "undefined" && window.__zt_currency) ?? "RWF");
+    const rate = (typeof window !== "undefined" && typeof window.__zt_fxRate === "number") ? window.__zt_fxRate : 1;
+    const nf = moneyFormat(c);
+    return nf.format(Number(n || 0) * rate);
+  } catch (_e) {
+    return String(n ?? 0);
+  }
+};
+// Convert a display-currency amount back into base currency.
+// Base currency is the internal storage/calc currency for products/transactions.
+const toBaseMoney = (amount) => {
+  const n = Number(amount || 0);
+  if (!Number.isFinite(n)) return 0;
+  try {
+    const rate = (typeof window !== "undefined" && typeof window.__zt_fxRate === "number") ? window.__zt_fxRate : 1;
+    const r = Number(rate || 1);
+    if (!Number.isFinite(r) || r <= 0) return n;
+    return n / r;
+  } catch (_e) {
+    return n;
+  }
+};
+// Ensure default currency is RWF even before React runs.
+if (typeof window !== "undefined") {
+  window.__zt_currency = "RWF";
+  if (typeof window.__zt_fxRate !== "number") window.__zt_fxRate = 1;
+}
+const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
+const parseDate = (d) => new Date(d + "T00:00:00");
+const isToday = (d) => d === today();
+const isThisWeek = (d) => daysBetween(d, today()) <= 7 && daysBetween(d, today()) >= 0;
+const isThisMonth = (d) => { const t = new Date(); const dd = parseDate(d); return dd.getMonth() === t.getMonth() && dd.getFullYear() === t.getFullYear(); };
+const isThisYear = (d) => parseDate(d).getFullYear() === new Date().getFullYear();
+
+const UNIT_DEFS = {
+  kg: { type: "mass", factor: 1000 },
+  hg: { type: "mass", factor: 100 },
+  dag: { type: "mass", factor: 10 },
+  g: { type: "mass", factor: 1 },
+  dg: { type: "mass", factor: 0.1 },
+  cg: { type: "mass", factor: 0.01 },
+  mg: { type: "mass", factor: 0.001 },
+  l: { type: "volume", factor: 1000 },
+  dl: { type: "volume", factor: 100 },
+  cl: { type: "volume", factor: 10 },
+  ml: { type: "volume", factor: 1 },
+  piece: { type: "count", factor: 1 },
+  dozen: { type: "count", factor: 12 },
+  bag: { type: "count", factor: 1 },
+  box: { type: "count", factor: 1 },
+  bottle: { type: "count", factor: 1 },
+  packet: { type: "count", factor: 1 },
+};
+const UNITS = Object.keys(UNIT_DEFS);
+const UNIT_FULL_NAMES = {
+  kg: "kilogram",
+  hg: "hectogram",
+  dag: "decagram",
+  g: "gram",
+  dg: "decigram",
+  cg: "centigram",
+  mg: "milligram",
+  l: "liter",
+  dl: "deciliter",
+  cl: "centiliter",
+  ml: "milliliter",
+  piece: "piece",
+  dozen: "dozen",
+  bag: "bag",
+  box: "box",
+  bottle: "bottle",
+  packet: "packet",
+};
+const UNIT_ALIASES = {
+  // Mass full forms
+  kilogram: "kg", kilograms: "kg",
+  hectogram: "hg", hectograms: "hg",
+  decagram: "dag", decagrams: "dag",
+  gram: "g", grams: "g",
+  decigram: "dg", decigrams: "dg",
+  centigram: "cg", centigrams: "cg",
+  milligram: "mg", milligrams: "mg",
+
+  // Volume full forms
+  liter: "l", liters: "l", litre: "l", litres: "l",
+  deciliter: "dl", deciliters: "dl",
+  centiliter: "cl", centiliters: "cl",
+  milliliter: "ml", milliliters: "ml",
+
+  // Count forms
+  piece: "piece", pieces: "piece", pcs: "piece",
+  dozen: "dozen", dozens: "dozen",
+  bag: "bag", bags: "bag",
+  box: "box", boxes: "box",
+  bottle: "bottle", bottles: "bottle",
+  packet: "packet", packets: "packet",
+
+  // Keep existing aliases
+  liters: "l",
+};
+const normalizeUnit = (u = "") => {
+  const unit = String(u).trim().toLowerCase().replace(/[^a-z]/g, "");
+  return UNIT_ALIASES[unit] || unit;
+};
+const unitFull = (u) => UNIT_FULL_NAMES[normalizeUnit(u)] || normalizeUnit(u);
+const LANGS = {
+  en: "English",
+  sw: "Kiswahili",
+  rw: "Kinyarwanda",
+  fr: "Français",
+  zh: "中文",
+};
+const LOCALE_BY_LANG = { en: "en", sw: "sw", rw: "rw", fr: "fr", zh: "zh-CN" };
+const localeForLang = (lang) => LOCALE_BY_LANG[lang] || "en";
+const I18N = {
+  en: {
+    "common.language": "Language",
+    "common.logout": "Log Out",
+    "common.save": "Save",
+    "common.saving": "Saving...",
+    "common.saved": "Saved",
+    "common.saveFailed": "Save failed",
+    "common.saveTitle": "Save data to this device",
+    "common.loading": "Loading...",
+    "common.noDataDash.title": "Welcome to ZuriTrack!",
+    "common.noDataDash.body1": "Your inventory is empty. Head to",
+    "common.noDataDash.body2": "in the sidebar to add your first products.",
+    "common.noDataDash.body3": "Products are created automatically — just type a name, enter quantity and cost, and you're done.",
+    "common.orders": "orders",
+    "common.entries": "entries",
+    "common.unitsTotal": "units total",
+    "common.margin": "margin",
+    "common.totalInStock": "Total in stock",
+    "common.noStockYet": "No stock yet. Add products to populate this chart.",
+    "common.totalValue": "Total Value",
+    "nav.dashboard": "Dashboard",
+    "nav.uptime": "Uptime",
+    "nav.stockIn": "Add Stock",
+    "nav.stockOut": "Sell Product",
+    "nav.inventory": "Inventory",
+    "nav.reports": "Reports",
+    "period.today": "Today",
+    "period.weekly": "Weekly",
+    "period.monthly": "Monthly",
+    "period.yearly": "Yearly",
+    "dashboard.salesPurchases": "Sales & Purchases",
+    "dashboard.stockDistribution": "Stock Distribution",
+    "dashboard.totalSales": "Total Sales",
+    "dashboard.totalPurchases": "Total Purchases",
+    "dashboard.netProfit": "Net Profit",
+    "dashboard.itemsSold": "Items Sold",
+    "dashboard.topSellingProducts": "Top Selling Products",
+    "dashboard.lowStockAlerts": "Low Stock Alerts",
+    "dashboard.recentTransactions": "Recent Transactions",
+    "common.searchProducts": "Search products...",
+    "common.sort.name": "Sort by Name",
+    "common.sort.stock": "Sort by Stock",
+    "common.sort.value": "Sort by Value",
+    "reports.filters.from": "From",
+    "reports.filters.to": "To",
+    "reports.filters.product": "Product",
+    "reports.filters.type": "Type",
+    "reports.filters.allProducts": "All products",
+    "reports.type.all": "All",
+    "reports.type.in": "Stock In",
+    "reports.type.out": "Sales",
+    "reports.summary.itemsIn": "Items In",
+    "reports.summary.itemsOut": "Items Out",
+    "reports.summary.totalCost": "Total Cost",
+    "reports.summary.revenue": "Revenue",
+    "reports.summary.profit": "Profit",
+    "reports.transactions": "Transactions",
+    "reports.table.product": "Product",
+    "reports.table.type": "Type",
+    "reports.table.qty": "Qty",
+    "reports.table.costUnit": "Cost/unit",
+    "reports.table.saleUnit": "Sale/unit",
+    "reports.table.total": "Total",
+    "reports.table.profit": "Profit",
+    "reports.table.date": "Date",
+    "reports.table.time": "Time",
+    "reports.badge.in": "IN",
+    "reports.badge.sale": "SALE",
+    "reports.importError": "Could not import file. Use a valid JSON backup.",
+    "reports.invalidBackupFile": "Invalid backup file",
+    "reports.importedData": "Imported {products} products and {transactions} transactions",
+    "common.exportCSV": "Export CSV",
+    "common.exportBackup": "Export Full Backup",
+    "common.importBackup": "Import Backup",
+    "common.undoDelete": "Undo Delete",
+    "common.remove": "Remove",
+    "stockIn.singleItem": "Single Item",
+    "stockIn.multiItem": "Multi Item",
+    "stockIn.productName": "Product Name",
+    "stockIn.startTypingProduct": "Start typing product name...",
+    "stockIn.quantity": "Quantity",
+    "stockIn.unit": "Unit",
+    "stockIn.enterMultiple": "Enter multiple items (e.g.,",
+    "stockIn.multiPlaceholder": "Potato 10kg RWF 300, Maize 30kg RWF 300",
+    "stockIn.defaultCost": "Default Cost (RWF/unit) (optional)",
+    "stockIn.defaultSale": "Default Sale (RWF/unit) (optional)",
+    "stockIn.preview": "Preview",
+    "stockIn.addAllItems": "Add All Items",
+    "stockIn.quickTemplates": "Quick Templates",
+    "stockIn.timestampAuto": "Date and time are added automatically",
+    "stockIn.addStock": "Add Stock",
+    "stockIn.parseError": "Could not parse input. Use format: Potato 10kg RWF 300, Maize 30kg RWF 300",
+    "stockIn.addedItems": "Added {count} items to stock",
+    "stockIn.costFromPriceTag": "Cost from price tag",
+    "stockIn.enterDate": "Date",
+    "stockIn.enterTime": "Time",
+    "stockIn.costPrompt": "How do you want to enter cost?",
+    "stockIn.costMode.total": "I paid total amount",
+    "stockIn.costMode.perUnit": "I know price per {unit}",
+    "stockIn.totalPaid": "Total Amount Paid (RWF)",
+    "stockIn.totalPaidPlaceholder": "e.g. 1200 for the whole batch",
+    "stockIn.pricePerUnit": "Price per {unit} (RWF)",
+    "stockIn.pricePerUnitPlaceholder": "e.g. 1.50 per {unit}",
+    "stockIn.salePriceOptional": "Sale price per {unit} (RWF/unit) (optional)",
+    "stockIn.salePriceOptionalPlaceholder": "e.g. 2.99 per {unit} (optional)",
+    "stockIn.autoBreakdown": "Auto-Calculated Breakdown",
+    "stockIn.costPer": "Cost per {unit}",
+    "stockIn.totalCost": "Total Cost",
+    "stockOut.startTyping": "Start typing to find product...",
+    "stockOut.inStock": "In Stock",
+    "stockOut.costPrice": "Cost Price",
+    "stockOut.lastSalePrice": "Last Sale Price",
+    "stockOut.howEnterSalePrice": "How do you want to enter the sale price?",
+    "stockOut.pricePer": "Price per {unit}",
+    "stockOut.totalReceived": "Total received",
+    "stockOut.salePricePer": "Sale price per {unit} (RWF)",
+    "stockOut.totalAmountReceived": "Total amount received (RWF)",
+    "stockOut.completeSale": "Complete Sale",
+    "stockOut.quickSell": "Quick Sell — Frequent Products",
+    "stockOut.noProducts": "No products to sell",
+    "stockOut.addStockFirst": "Add products through {addStock} first, then come back here to sell.",
+    "common.inventoryManager": "Inventory Manager",
+    "common.myShop": "My Shop",
+    "common.admin": "admin",
+    "stockIn.error.nameQty": "Please enter product name and quantity",
+    "stockIn.error.validCost": "Please enter a valid cost",
+    "stockIn.error.unitNotCompatible": "Unit \"{unit}\" is not compatible with \"{productUnit}\"",
+    "stockIn.success.added": "Added {qty} {unit} of {name} ({stockQty} {productUnit} in stock)",
+    "stockOut.error.selectProduct": "Please select a product",
+    "stockOut.error.enterQuantity": "Please enter quantity",
+    "stockOut.error.validSalePrice": "Please enter a valid sale price",
+    "stockOut.error.unitNotCompatible": "Selected unit is not compatible with product unit",
+    "stockOut.error.notEnoughStock": "Not enough stock!",
+    "stockOut.success.sold": "Sold {qty} {unit} of {name}. Remaining: {remaining} {productUnit}",
+    "inventory.error.invalidCostPrice": "Invalid cost price",
+    "inventory.error.invalidSalePrice": "Invalid sale price",
+    "inventory.success.updatedPrices": "Updated prices for {name}: Cost {cost}/{unit}, Sale {sale}/{unit}",
+    "common.productRemovedUndo": "\"{name}\" removed. You can undo.",
+    "common.productRestored": "Restored \"{name}\"",
+    "common.level.low": "Low",
+    "common.level.medium": "Medium",
+    "common.level.good": "Good",
+    "inventory.price": "Price",
+    "inventory.base": "base",
+    "dashboard.allWellStocked": "All products are well-stocked!",
+    "unit.piece": "piece",
+    "unit.kg": "kg",
+    "unit.g": "g",
+    "unit.l": "l",
+    "unit.ml": "ml",
+    "unit.mg": "mg",
+    "unit.ton": "ton",
+    "unit.dozen": "dozen",
+    "unitFull.kg": "kilogram",
+    "unitFull.g": "gram",
+    "unitFull.mg": "milligram",
+    "unitFull.l": "liter",
+    "unitFull.ml": "milliliter",
+    "unitFull.piece": "piece",
+    "unitFull.dozen": "dozen",
+    "unitFull.ton": "ton",
+  },
+  sw: {
+    "common.language": "Lugha",
+    "common.logout": "Toka",
+    "common.save": "Hifadhi",
+    "common.saving": "Inahifadhi...",
+    "common.saved": "Imehifadhiwa",
+    "common.saveFailed": "Imeshindikana kuhifadhi",
+    "common.saveTitle": "Hifadhi data kwenye kifaa hiki",
+    "common.loading": "Inapakia...",
+    "common.noDataDash.title": "Karibu ZuriTrack!",
+    "common.noDataDash.body1": "Huna bidhaa kwenye orodha. Nenda",
+    "common.noDataDash.body2": "kwenye upande wa kushoto kuongeza bidhaa zako za kwanza.",
+    "common.noDataDash.body3": "Bidhaa huundwa kiotomatiki — andika jina, weka kiasi na gharama, na umemaliza.",
+    "common.orders": "oda",
+    "common.entries": "maingizo",
+    "common.unitsTotal": "jumla ya vipimo",
+    "common.margin": "faida",
+    "common.totalInStock": "Jumla kwenye stock",
+    "common.noStockYet": "Hakuna stock bado. Ongeza bidhaa ili chati ijazwe.",
+    "common.totalValue": "Thamani Jumla",
+    "nav.dashboard": "Dashibodi",
+    "nav.stockIn": "Ongeza Hisa",
+    "nav.stockOut": "Uza Bidhaa",
+    "nav.inventory": "Hesabu",
+    "nav.reports": "Ripoti",
+    "period.today": "Leo",
+    "period.weekly": "Kila wiki",
+    "period.monthly": "Kila mwezi",
+    "period.yearly": "Kila mwaka",
+    "dashboard.salesPurchases": "Mauzo na Manunuzi",
+    "dashboard.stockDistribution": "Gawanyo la Hisa",
+    "dashboard.totalSales": "Jumla ya Mauzo",
+    "dashboard.totalPurchases": "Jumla ya Manunuzi",
+    "dashboard.netProfit": "Faida Halisi",
+    "dashboard.itemsSold": "Bidhaa Zilizouzwa",
+    "dashboard.topSellingProducts": "Bidhaa Zinazouzwa Zaidi",
+    "dashboard.lowStockAlerts": "Tahadhari za Hisa Ndogo",
+    "dashboard.recentTransactions": "Miamala ya Hivi Karibuni",
+    "common.searchProducts": "Tafuta bidhaa...",
+    "common.sort.name": "Panga kwa Jina",
+    "common.sort.stock": "Panga kwa Hisa",
+    "common.sort.value": "Panga kwa Thamani",
+    "reports.filters.from": "Kuanzia",
+    "reports.filters.to": "Hadi",
+    "reports.filters.product": "Bidhaa",
+    "reports.filters.type": "Aina",
+    "reports.filters.allProducts": "Bidhaa zote",
+    "reports.type.all": "Zote",
+    "reports.type.in": "Stock In",
+    "reports.type.out": "Mauzo",
+    "reports.summary.itemsIn": "Vilivyoingizwa",
+    "reports.summary.itemsOut": "Vilivyotoka",
+    "reports.summary.totalCost": "Gharama Jumla",
+    "reports.summary.revenue": "Mapato",
+    "reports.summary.profit": "Faida",
+    "reports.transactions": "Miamala",
+    "reports.table.product": "Bidhaa",
+    "reports.table.type": "Aina",
+    "reports.table.qty": "Kiasi",
+    "reports.table.costUnit": "Gharama/kipimo",
+    "reports.table.saleUnit": "Bei/kipimo",
+    "reports.table.total": "Jumla",
+    "reports.table.profit": "Faida",
+    "reports.table.date": "Tarehe",
+    "reports.table.time": "Muda",
+    "reports.badge.in": "INGIZA",
+    "reports.badge.sale": "MAUZO",
+    "reports.importError": "Imeshindikana kuingiza faili. Tumia nakala ya JSON sahihi.",
+    "reports.invalidBackupFile": "Faili ya nakala si sahihi",
+    "reports.importedData": "Imeingiza bidhaa {products} na miamala {transactions}",
+    "common.exportCSV": "Hamisha CSV",
+    "common.exportBackup": "Hamisha Nakala Kamili",
+    "common.importBackup": "Ingiza Nakala",
+    "common.undoDelete": "Tendua Kufuta",
+    "common.remove": "Ondoa",
+    "stockIn.singleItem": "Kitu kimoja",
+    "stockIn.multiItem": "Bidhaa nyingi",
+    "stockIn.productName": "Jina la Bidhaa",
+    "stockIn.startTypingProduct": "Anza kuandika jina la bidhaa...",
+    "stockIn.quantity": "Kiasi",
+    "stockIn.unit": "Kitengo",
+    "stockIn.enterMultiple": "Ingiza bidhaa nyingi (mfano,",
+    "stockIn.multiPlaceholder": "Viazi 10kg RWF 300, Mahindi 30kg RWF 300",
+    "stockIn.defaultCost": "Gharama chaguomsingi (RWF/kitengo) (hiari)",
+    "stockIn.defaultSale": "Bei ya kuuza chaguomsingi (RWF/kitengo) (hiari)",
+    "stockIn.preview": "Hakikisho",
+    "stockIn.addAllItems": "Ongeza Bidhaa Zote",
+    "stockIn.quickTemplates": "Mifano ya Haraka",
+    "stockIn.timestampAuto": "Tarehe na muda vinaongezwa moja kwa moja",
+    "stockIn.addStock": "Ongeza Hisa",
+    "stockIn.parseError": "Imeshindikana kusoma maandishi. Tumia muundo: Viazi 10kg RWF 300, Mahindi 30kg RWF 300",
+    "stockIn.addedItems": "Bidhaa {count} zimeongezwa kwenye hisa",
+    "stockIn.costFromPriceTag": "Gharama kutoka bei iliyoandikwa",
+    "stockIn.enterDate": "Tarehe",
+    "stockIn.enterTime": "Muda",
+    "stockIn.costPrompt": "Unataka kuingiza gharama vipi?",
+    "stockIn.costMode.total": "Nimelipa jumla ya kiasi",
+    "stockIn.costMode.perUnit": "Najua bei kwa {unit}",
+    "stockIn.totalPaid": "Jumla Iliyolipwa (RWF)",
+    "stockIn.totalPaidPlaceholder": "mf. 1200 kwa mzigo wote",
+    "stockIn.pricePerUnit": "Bei kwa {unit} (RWF)",
+    "stockIn.pricePerUnitPlaceholder": "mf. 1.50 kwa {unit}",
+    "stockIn.salePriceOptional": "Bei ya kuuza kwa {unit} (RWF/kitengo) (hiari)",
+    "stockIn.salePriceOptionalPlaceholder": "mf. 2.99 kwa {unit} (hiari)",
+    "stockIn.autoBreakdown": "Muhtasari wa Hesabu Kiotomatiki",
+    "stockIn.costPer": "Gharama kwa {unit}",
+    "stockIn.totalCost": "Gharama Jumla",
+    "stockOut.startTyping": "Anza kuandika kutafuta bidhaa...",
+    "stockOut.inStock": "Hisa Iliyopo",
+    "stockOut.costPrice": "Bei ya Gharama",
+    "stockOut.lastSalePrice": "Bei ya Mwisho ya Uuzaji",
+    "stockOut.howEnterSalePrice": "Unataka kuingiza bei ya uuzaji vipi?",
+    "stockOut.pricePer": "Bei kwa {unit}",
+    "stockOut.totalReceived": "Jumla iliyopokelewa",
+    "stockOut.salePricePer": "Bei ya kuuza kwa {unit} (RWF)",
+    "stockOut.totalAmountReceived": "Jumla ya fedha iliyopokelewa (RWF)",
+    "stockOut.completeSale": "Kamilisha Uuzaji",
+    "stockOut.quickSell": "Uuzaji wa Haraka — Bidhaa za Mara kwa Mara",
+    "stockOut.noProducts": "Hakuna bidhaa ya kuuza",
+    "stockOut.addStockFirst": "Ongeza bidhaa kupitia {addStock} kwanza, kisha urudi hapa kuuza.",
+    "common.inventoryManager": "Msimamizi wa Hisa",
+    "common.myShop": "Duka Langu",
+    "common.admin": "msimamizi",
+    "stockIn.error.nameQty": "Tafadhali weka jina la bidhaa na kiasi",
+    "stockIn.error.validCost": "Tafadhali weka gharama halali",
+    "stockIn.error.unitNotCompatible": "Kipimo \"{unit}\" hakiendani na \"{productUnit}\"",
+    "stockIn.success.added": "Imeongezwa {qty} {unit} ya {name} ({stockQty} {productUnit} kwenye hisa)",
+    "stockOut.error.selectProduct": "Tafadhali chagua bidhaa",
+    "stockOut.error.enterQuantity": "Tafadhali weka kiasi",
+    "stockOut.error.validSalePrice": "Tafadhali weka bei halali ya kuuza",
+    "stockOut.error.unitNotCompatible": "Kipimo ulichochagua hakiendani na kipimo cha bidhaa",
+    "stockOut.error.notEnoughStock": "Hisa haitoshi!",
+    "stockOut.success.sold": "Umeuza {qty} {unit} ya {name}. Iliyobaki: {remaining} {productUnit}",
+    "inventory.error.invalidCostPrice": "Bei ya gharama si sahihi",
+    "inventory.error.invalidSalePrice": "Bei ya kuuza si sahihi",
+    "inventory.success.updatedPrices": "Bei zimesasishwa kwa {name}: Gharama {cost}/{unit}, Uuzaji {sale}/{unit}",
+    "common.productRemovedUndo": "\"{name}\" imeondolewa. Unaweza kutengua.",
+    "common.productRestored": "Imerejeshwa \"{name}\"",
+    "common.level.low": "Hisa Ndogo",
+    "common.level.medium": "Wastani",
+    "common.level.good": "Nzuri",
+    "inventory.price": "Bei",
+    "inventory.base": "msingi",
+    "dashboard.allWellStocked": "Bidhaa zote zina hisa ya kutosha!",
+    "unit.piece": "kipande",
+    "unit.kg": "kg",
+    "unit.g": "g",
+    "unit.l": "lita",
+    "unit.ml": "ml",
+    "unit.mg": "mg",
+    "unit.ton": "tani",
+    "unit.dozen": "dazeni",
+    "unitFull.kg": "kilogramu",
+    "unitFull.g": "gramu",
+    "unitFull.mg": "miligramu",
+    "unitFull.l": "lita",
+    "unitFull.ml": "mililita",
+    "unitFull.piece": "kipande",
+    "unitFull.dozen": "dazeni",
+    "unitFull.ton": "tani",
+  },
+  rw: {
+    "common.language": "Ururimi",
+    "common.logout": "Sohoka",
+    "common.save": "Bika",
+    "common.saving": "Birabika...",
+    "common.saved": "Byabitswe",
+    "common.saveFailed": "Kubika byanze",
+    "common.saveTitle": "Bika amakuru kuri iki gikoresho",
+    "common.loading": "Birimo gutangizwa...",
+    "common.noDataDash.title": "Murakaza neza kuri ZuriTrack!",
+    "common.noDataDash.body1": "Ububiko bwawe burimo ubusa. Jya kuri",
+    "common.noDataDash.body2": "ku ruhande wongere ibicuruzwa bya mbere.",
+    "common.noDataDash.body3": "Ibicuruzwa bihanwa bihita — andika izina, andika ingano n'igiciro, urarangiza.",
+    "common.orders": "amategeko",
+    "common.entries": "inyandiko",
+    "common.unitsTotal": "ingano zose",
+    "common.margin": "inyungu",
+    "common.totalInStock": "Igiteranyo mu bubiko",
+    "common.noStockYet": "Nta bubiko buriho. Ongeramo ibicuruzwa kugira ngo igishushanyo kigaragare.",
+    "common.totalValue": "Agaciro kose",
+    "nav.dashboard": "Ikibaho",
+    "nav.stockIn": "Ongeramo Stock",
+    "nav.stockOut": "Kugurisha",
+    "nav.inventory": "Ububiko",
+    "nav.reports": "Raporo",
+    "period.today": "Uyu munsi",
+    "period.weekly": "Icyumweru",
+    "period.monthly": "Ukwezi",
+    "period.yearly": "Umwaka",
+    "dashboard.salesPurchases": "Kugurisha no Kugura",
+    "dashboard.stockDistribution": "Ibwiciro by'Ububiko",
+    "dashboard.totalSales": "Igurishwa Ryose",
+    "dashboard.totalPurchases": "Ibitugu byose (Kugura)",
+    "dashboard.netProfit": "Aho inyungu ihagaze",
+    "dashboard.itemsSold": "Ibicuruzwa byagurishijwe",
+    "dashboard.topSellingProducts": "Ibicuruzwa Byagurishijwe Cyane",
+    "dashboard.lowStockAlerts": "Iburira ry'Ububiko Buke",
+    "dashboard.recentTransactions": "Ibyakozwe Vuba",
+    "common.searchProducts": "Shakisha ibicuruzwa...",
+    "common.sort.name": "Rondora ku izina",
+    "common.sort.stock": "Rondora ku stock",
+    "common.sort.value": "Rondora ku gaciro",
+    "reports.filters.from": "Bivuye",
+    "reports.filters.to": "Kugeza",
+    "reports.filters.product": "Ibicuruzwa",
+    "reports.filters.type": "Ubwoko",
+    "reports.filters.allProducts": "Ibicuruzwa byose",
+    "reports.type.all": "Byose",
+    "reports.type.in": "Byinjijwe",
+    "reports.type.out": "Byagurishijwe",
+    "reports.summary.itemsIn": "Ibyinjijwe",
+    "reports.summary.itemsOut": "Ibyasohotse",
+    "reports.summary.totalCost": "Ikiguzi cyose",
+    "reports.summary.revenue": "Amafaranga yinjiye",
+    "reports.summary.profit": "Inyungu",
+    "reports.transactions": "Ibyakozwe",
+    "reports.table.product": "Igicuruzwa",
+    "reports.table.type": "Ubwoko",
+    "reports.table.qty": "Ingano",
+    "reports.table.costUnit": "Ikiguzi/igipimo",
+    "reports.table.saleUnit": "Igurishwa/igipimo",
+    "reports.table.total": "Igiteranyo",
+    "reports.table.profit": "Inyungu",
+    "reports.table.date": "Itariki",
+    "reports.table.time": "Igihe",
+    "reports.badge.in": "IN",
+    "reports.badge.sale": "SALE",
+    "reports.importError": "Ntibishoboye kwinjiza dosiye. Koresha backup ya JSON yemewe.",
+    "reports.invalidBackupFile": "Backup file siyo",
+    "reports.importedData": "Yinjijwe ibicuruzwa {products} n'ibyakozwe {transactions}",
+    "common.exportCSV": "Ohereza CSV",
+    "common.exportBackup": "Ohereza Backup Nto",
+    "common.importBackup": "Shyiramo Backup",
+    "common.undoDelete": "Tweza Gusiba",
+    "common.remove": "Siba",
+    "stockIn.singleItem": "Ikintu kimwe",
+    "stockIn.multiItem": "Ibintu byinshi",
+    "stockIn.productName": "Izina ry'Igicuruzwa",
+    "stockIn.startTypingProduct": "Tangira wandike izina ry'igicuruzwa...",
+    "stockIn.quantity": "Ingano",
+    "stockIn.unit": "Igipimo",
+    "stockIn.enterMultiple": "Andika ibicuruzwa byinshi (urugero,",
+    "stockIn.multiPlaceholder": "Ibirayi 10kg RWF 300, Ibigori 30kg RWF 300",
+    "stockIn.defaultCost": "Igiciro fatizo (RWF/igipimo) (si ngombwa)",
+    "stockIn.defaultSale": "Igiciro cyo kugurisha fatizo (RWF/igipimo) (si ngombwa)",
+    "stockIn.preview": "Ibanze kureba",
+    "stockIn.addAllItems": "Ongeramo Ibintu Byose",
+    "stockIn.quickTemplates": "Ingero Zihuse",
+    "stockIn.timestampAuto": "Itariki n'igihe byongerwaho ako kanya",
+    "stockIn.addStock": "Ongeramo Stock",
+    "stockIn.parseError": "Ntibyasomye neza inyandiko. Koresha: Ibirayi 10kg RWF 300, Ibigori 30kg RWF 300",
+    "stockIn.addedItems": "Ibintu {count} byongewe muri stock",
+    "stockIn.costFromPriceTag": "Ikiguzi gikuwe ku giciro",
+    "stockIn.enterDate": "Itariki",
+    "stockIn.enterTime": "Igihe",
+    "stockIn.costPrompt": "Ushaka kwinjiza ikiguzi ute?",
+    "stockIn.costMode.total": "Nishyuye amafaranga yose",
+    "stockIn.costMode.perUnit": "Nzi igiciro kuri {unit}",
+    "stockIn.totalPaid": "Amafaranga Yose Yishyuwe (RWF)",
+    "stockIn.totalPaidPlaceholder": "urug. 1200 ku bipimo byose",
+    "stockIn.pricePerUnit": "Igiciro kuri {unit} (RWF)",
+    "stockIn.pricePerUnitPlaceholder": "urug. 1.50 kuri {unit}",
+    "stockIn.salePriceOptional": "Igiciro cyo kugurisha kuri {unit} (RWF/igipimo) (si ngombwa)",
+    "stockIn.salePriceOptionalPlaceholder": "urug. 2.99 kuri {unit} (si ngombwa)",
+    "stockIn.autoBreakdown": "Ibisobanuro by'ibaruramari (byikora)",
+    "stockIn.costPer": "Ikiguzi kuri {unit}",
+    "stockIn.totalCost": "Ikiguzi cyose",
+    "stockOut.startTyping": "Tangira wandike ushaka igicuruzwa...",
+    "stockOut.inStock": "Muri Stock",
+    "stockOut.costPrice": "Igiciro cy'ikiguzi",
+    "stockOut.lastSalePrice": "Igiciro cya nyuma cyagurishijweho",
+    "stockOut.howEnterSalePrice": "Ushaka kwinjiza igiciro cyo kugurisha ute?",
+    "stockOut.pricePer": "Igiciro kuri {unit}",
+    "stockOut.totalReceived": "Amafaranga yose yakiriwe",
+    "stockOut.salePricePer": "Igiciro cyo kugurisha kuri {unit} (RWF)",
+    "stockOut.totalAmountReceived": "Amafaranga yose yakiriwe (RWF)",
+    "stockOut.completeSale": "Rangiza Igurisha",
+    "stockOut.quickSell": "Igurisha Ryihuse — Ibicuruzwa Bikunze",
+    "stockOut.noProducts": "Nta bicuruzwa byo kugurisha",
+    "stockOut.addStockFirst": "Banza wongere ibicuruzwa ukoresheje {addStock}, hanyuma ugaruke hano kugurisha.",
+    "common.inventoryManager": "Umuyobozi w'Ububiko",
+    "common.myShop": "Iduka Ryanjye",
+    "common.admin": "admin",
+    "stockIn.error.nameQty": "Andika izina ry'igicuruzwa n'ingano",
+    "stockIn.error.validCost": "Andika ikiguzi gifite agaciro",
+    "stockIn.error.unitNotCompatible": "Igipimo \"{unit}\" ntigihuye na \"{productUnit}\"",
+    "stockIn.success.added": "Hongewe {qty} {unit} bya {name} ({stockQty} {productUnit} biri muri stock)",
+    "stockOut.error.selectProduct": "Hitamo igicuruzwa",
+    "stockOut.error.enterQuantity": "Andika ingano",
+    "stockOut.error.validSalePrice": "Andika igiciro cyo kugurisha gifite agaciro",
+    "stockOut.error.unitNotCompatible": "Igipimo wahisemo ntigihuye n'igipimo cy'igicuruzwa",
+    "stockOut.error.notEnoughStock": "Stock ntihagije!",
+    "stockOut.success.sold": "Wagurishije {qty} {unit} bya {name}. Hasigaye: {remaining} {productUnit}",
+    "inventory.error.invalidCostPrice": "Igiciro cy'ikiguzi si cyo",
+    "inventory.error.invalidSalePrice": "Igiciro cyo kugurisha si cyo",
+    "inventory.success.updatedPrices": "Ibiciro byavuguruwe kuri {name}: Ikiguzi {cost}/{unit}, Igurisha {sale}/{unit}",
+    "common.productRemovedUndo": "\"{name}\" cyasibwe. Ushobora gusubiza inyuma.",
+    "common.productRestored": "\"{name}\" cyagaruwe",
+    "common.level.low": "Nto",
+    "common.level.medium": "Hagati",
+    "common.level.good": "Ni byiza",
+    "inventory.price": "Igiciro",
+    "inventory.base": "shingiro",
+    "dashboard.allWellStocked": "Ibicuruzwa byose bifite stock ihagije!",
+    "unit.piece": "agace",
+    "unit.kg": "kg",
+    "unit.g": "g",
+    "unit.l": "l",
+    "unit.ml": "ml",
+    "unit.mg": "mg",
+    "unit.ton": "toni",
+    "unit.dozen": "duzine",
+    "unitFull.kg": "kilogarama",
+    "unitFull.g": "garama",
+    "unitFull.mg": "miligarama",
+    "unitFull.l": "litiro",
+    "unitFull.ml": "mililitiro",
+    "unitFull.piece": "agace",
+    "unitFull.dozen": "duzine",
+    "unitFull.ton": "toni",
+  },
+  fr: {
+    "common.language": "Langue",
+    "common.logout": "Déconnexion",
+    "common.save": "Enregistrer",
+    "common.saving": "Enregistrement...",
+    "common.saved": "Enregistré",
+    "common.saveFailed": "Échec de l’enregistrement",
+    "common.saveTitle": "Enregistrer les données sur cet appareil",
+    "common.loading": "Chargement...",
+    "common.noDataDash.title": "Bienvenue sur ZuriTrack !",
+    "common.noDataDash.body1": "Votre inventaire est vide. Allez dans",
+    "common.noDataDash.body2": "dans la barre latérale pour ajouter vos premiers produits.",
+    "common.noDataDash.body3": "Les produits sont créés automatiquement — saisissez un nom, une quantité et un coût, et c’est fait.",
+    "common.orders": "commandes",
+    "common.entries": "entrées",
+    "common.unitsTotal": "unités au total",
+    "common.margin": "marge",
+    "common.totalInStock": "Total en stock",
+    "common.noStockYet": "Aucun stock pour l’instant. Ajoutez des produits pour remplir ce graphique.",
+    "common.totalValue": "Valeur totale",
+    "nav.dashboard": "Tableau de bord",
+    "nav.stockIn": "Ajouter du stock",
+    "nav.stockOut": "Vendre le produit",
+    "nav.inventory": "Inventaire",
+    "nav.reports": "Rapports",
+    "period.today": "Aujourd'hui",
+    "period.weekly": "Hebdomadaire",
+    "period.monthly": "Mensuel",
+    "period.yearly": "Annuel",
+    "dashboard.salesPurchases": "Ventes et Achats",
+    "dashboard.stockDistribution": "Répartition du stock",
+    "dashboard.totalSales": "Ventes totales",
+    "dashboard.totalPurchases": "Achats totaux",
+    "dashboard.netProfit": "Bénéfice net",
+    "dashboard.itemsSold": "Articles vendus",
+    "dashboard.topSellingProducts": "Produits les plus vendus",
+    "dashboard.lowStockAlerts": "Alerte stock faible",
+    "dashboard.recentTransactions": "Transactions récentes",
+    "common.searchProducts": "Rechercher des produits...",
+    "common.sort.name": "Trier par nom",
+    "common.sort.stock": "Trier par stock",
+    "common.sort.value": "Trier par valeur",
+    "reports.filters.from": "De",
+    "reports.filters.to": "À",
+    "reports.filters.product": "Produit",
+    "reports.filters.type": "Type",
+    "reports.filters.allProducts": "Tous les produits",
+    "reports.type.all": "Tous",
+    "reports.type.in": "Entrées stock",
+    "reports.type.out": "Ventes",
+    "reports.summary.itemsIn": "Articles entrants",
+    "reports.summary.itemsOut": "Articles sortants",
+    "reports.summary.totalCost": "Coût total",
+    "reports.summary.revenue": "Revenu",
+    "reports.summary.profit": "Bénéfice",
+    "reports.transactions": "Transactions",
+    "reports.table.product": "Produit",
+    "reports.table.type": "Type",
+    "reports.table.qty": "Qté",
+    "reports.table.costUnit": "Coût/unité",
+    "reports.table.saleUnit": "Vente/unité",
+    "reports.table.total": "Total",
+    "reports.table.profit": "Bénéfice",
+    "reports.table.date": "Date",
+    "reports.table.time": "Heure",
+    "reports.badge.in": "ENTRÉE",
+    "reports.badge.sale": "VENTE",
+    "reports.importError": "Impossible d’importer le fichier. Utilisez une sauvegarde JSON valide.",
+    "reports.invalidBackupFile": "Fichier de sauvegarde invalide",
+    "reports.importedData": "{products} produits et {transactions} transactions importés",
+    "common.exportCSV": "Exporter CSV",
+    "common.exportBackup": "Exporter une sauvegarde complète",
+    "common.importBackup": "Importer une sauvegarde",
+    "common.undoDelete": "Annuler la suppression",
+    "common.remove": "Supprimer",
+    "stockIn.singleItem": "Article unique",
+    "stockIn.multiItem": "Articles multiples",
+    "stockIn.productName": "Nom du produit",
+    "stockIn.startTypingProduct": "Commencez à saisir le nom du produit...",
+    "stockIn.quantity": "Quantité",
+    "stockIn.unit": "Unité",
+    "stockIn.enterMultiple": "Entrez plusieurs articles (ex.,",
+    "stockIn.multiPlaceholder": "Pomme de terre 10kg RWF 300, Maïs 30kg RWF 300",
+    "stockIn.defaultCost": "Coût par défaut (RWF/unité) (optionnel)",
+    "stockIn.defaultSale": "Vente par défaut (RWF/unité) (optionnel)",
+    "stockIn.preview": "Aperçu",
+    "stockIn.addAllItems": "Ajouter tous les articles",
+    "stockIn.quickTemplates": "Modèles rapides",
+    "stockIn.timestampAuto": "La date et l'heure sont ajoutées automatiquement",
+    "stockIn.addStock": "Ajouter du stock",
+    "stockIn.parseError": "Impossible d'analyser la saisie. Utilisez : Pomme de terre 10kg RWF 300, Maïs 30kg RWF 300",
+    "stockIn.addedItems": "{count} articles ajoutés au stock",
+    "stockIn.costFromPriceTag": "Coût depuis le prix saisi",
+    "stockIn.enterDate": "Date",
+    "stockIn.enterTime": "Heure",
+    "stockIn.costPrompt": "Comment voulez-vous saisir le coût ?",
+    "stockIn.costMode.total": "J’ai payé le montant total",
+    "stockIn.costMode.perUnit": "Je connais le prix par {unit}",
+    "stockIn.totalPaid": "Montant total payé (RWF)",
+    "stockIn.totalPaidPlaceholder": "ex. 1200 pour tout le lot",
+    "stockIn.pricePerUnit": "Prix par {unit} (RWF)",
+    "stockIn.pricePerUnitPlaceholder": "ex. 1,50 par {unit}",
+    "stockIn.salePriceOptional": "Prix de vente par {unit} (RWF/unité) (optionnel)",
+    "stockIn.salePriceOptionalPlaceholder": "ex. 2,99 par {unit} (optionnel)",
+    "stockIn.autoBreakdown": "Répartition calculée automatiquement",
+    "stockIn.costPer": "Coût par {unit}",
+    "stockIn.totalCost": "Coût total",
+    "stockOut.startTyping": "Commencez à saisir pour trouver un produit...",
+    "stockOut.inStock": "En stock",
+    "stockOut.costPrice": "Prix de revient",
+    "stockOut.lastSalePrice": "Dernier prix de vente",
+    "stockOut.howEnterSalePrice": "Comment voulez-vous saisir le prix de vente ?",
+    "stockOut.pricePer": "Prix par {unit}",
+    "stockOut.totalReceived": "Total reçu",
+    "stockOut.salePricePer": "Prix de vente par {unit} (RWF)",
+    "stockOut.totalAmountReceived": "Montant total reçu (RWF)",
+    "stockOut.completeSale": "Finaliser la vente",
+    "stockOut.quickSell": "Vente rapide — Produits fréquents",
+    "stockOut.noProducts": "Aucun produit à vendre",
+    "stockOut.addStockFirst": "Ajoutez d'abord des produits via {addStock}, puis revenez ici pour vendre.",
+    "common.inventoryManager": "Gestionnaire d'inventaire",
+    "common.myShop": "Ma boutique",
+    "common.admin": "admin",
+    "stockIn.error.nameQty": "Veuillez saisir le nom du produit et la quantité",
+    "stockIn.error.validCost": "Veuillez saisir un coût valide",
+    "stockIn.error.unitNotCompatible": "L'unité \"{unit}\" n'est pas compatible avec \"{productUnit}\"",
+    "stockIn.success.added": "{qty} {unit} de {name} ajouté(s) ({stockQty} {productUnit} en stock)",
+    "stockOut.error.selectProduct": "Veuillez sélectionner un produit",
+    "stockOut.error.enterQuantity": "Veuillez saisir une quantité",
+    "stockOut.error.validSalePrice": "Veuillez saisir un prix de vente valide",
+    "stockOut.error.unitNotCompatible": "L'unité sélectionnée n'est pas compatible avec l'unité du produit",
+    "stockOut.error.notEnoughStock": "Stock insuffisant !",
+    "stockOut.success.sold": "{qty} {unit} de {name} vendu(s). Reste : {remaining} {productUnit}",
+    "inventory.error.invalidCostPrice": "Prix de revient invalide",
+    "inventory.error.invalidSalePrice": "Prix de vente invalide",
+    "inventory.success.updatedPrices": "Prix mis à jour pour {name} : Coût {cost}/{unit}, Vente {sale}/{unit}",
+    "common.productRemovedUndo": "\"{name}\" supprimé. Vous pouvez annuler.",
+    "common.productRestored": "\"{name}\" restauré",
+    "common.level.low": "Faible",
+    "common.level.medium": "Moyen",
+    "common.level.good": "Bon",
+    "inventory.price": "Prix",
+    "inventory.base": "base",
+    "dashboard.allWellStocked": "Tous les produits sont bien approvisionnés !",
+    "unit.piece": "pièce",
+    "unit.kg": "kg",
+    "unit.g": "g",
+    "unit.l": "l",
+    "unit.ml": "ml",
+    "unit.mg": "mg",
+    "unit.ton": "tonne",
+    "unit.dozen": "douzaine",
+    "unitFull.kg": "kilogramme",
+    "unitFull.g": "gramme",
+    "unitFull.mg": "milligramme",
+    "unitFull.l": "litre",
+    "unitFull.ml": "millilitre",
+    "unitFull.piece": "pièce",
+    "unitFull.dozen": "douzaine",
+    "unitFull.ton": "tonne",
+  },
+  zh: {
+    "common.language": "语言",
+    "common.logout": "退出登录",
+    "common.save": "保存",
+    "common.saving": "正在保存…",
+    "common.saved": "已保存",
+    "common.saveFailed": "保存失败",
+    "common.saveTitle": "将数据保存到本设备",
+    "common.loading": "加载中…",
+    "common.noDataDash.title": "欢迎使用 ZuriTrack！",
+    "common.noDataDash.body1": "你的库存为空。请在侧边栏进入",
+    "common.noDataDash.body2": "以添加你的第一批产品。",
+    "common.noDataDash.body3": "产品会自动创建——输入名称、数量和成本即可完成。",
+    "common.orders": "订单",
+    "common.entries": "条目",
+    "common.unitsTotal": "单位合计",
+    "common.margin": "利润率",
+    "common.totalInStock": "库存总计",
+    "common.noStockYet": "暂无库存。请添加产品以填充该图表。",
+    "common.totalValue": "总价值",
+    "nav.dashboard": "仪表盘",
+    "nav.stockIn": "添加库存",
+    "nav.stockOut": "销售商品",
+    "nav.inventory": "库存",
+    "nav.reports": "报表",
+    "period.today": "今天",
+    "period.weekly": "每周",
+    "period.monthly": "每月",
+    "period.yearly": "每年",
+    "dashboard.salesPurchases": "销售与采购",
+    "dashboard.stockDistribution": "库存分布",
+    "dashboard.totalSales": "销售总额",
+    "dashboard.totalPurchases": "采购总额",
+    "dashboard.netProfit": "净利润",
+    "dashboard.itemsSold": "已售商品",
+    "dashboard.topSellingProducts": "热门畅销品",
+    "dashboard.lowStockAlerts": "低库存提醒",
+    "dashboard.recentTransactions": "最近交易",
+    "common.searchProducts": "搜索产品...",
+    "common.sort.name": "按名称排序",
+    "common.sort.stock": "按库存排序",
+    "common.sort.value": "按价值排序",
+    "reports.filters.from": "从",
+    "reports.filters.to": "到",
+    "reports.filters.product": "产品",
+    "reports.filters.type": "类型",
+    "reports.filters.allProducts": "全部产品",
+    "reports.type.all": "全部",
+    "reports.type.in": "入库",
+    "reports.type.out": "销售",
+    "reports.summary.itemsIn": "入库数量",
+    "reports.summary.itemsOut": "出库数量",
+    "reports.summary.totalCost": "总成本",
+    "reports.summary.revenue": "收入",
+    "reports.summary.profit": "利润",
+    "reports.transactions": "交易",
+    "reports.table.product": "产品",
+    "reports.table.type": "类型",
+    "reports.table.qty": "数量",
+    "reports.table.costUnit": "成本/单位",
+    "reports.table.saleUnit": "售价/单位",
+    "reports.table.total": "合计",
+    "reports.table.profit": "利润",
+    "reports.table.date": "日期",
+    "reports.table.time": "时间",
+    "reports.badge.in": "入库",
+    "reports.badge.sale": "销售",
+    "reports.importError": "无法导入文件。请使用有效的 JSON 备份。",
+    "reports.invalidBackupFile": "备份文件无效",
+    "reports.importedData": "已导入 {products} 个产品和 {transactions} 条交易",
+    "common.exportCSV": "导出 CSV",
+    "common.exportBackup": "导出完整备份",
+    "common.importBackup": "导入备份",
+    "common.undoDelete": "撤销删除",
+    "common.remove": "删除",
+    "stockIn.singleItem": "单个商品",
+    "stockIn.multiItem": "多个商品",
+    "stockIn.productName": "商品名称",
+    "stockIn.startTypingProduct": "开始输入商品名称...",
+    "stockIn.quantity": "数量",
+    "stockIn.unit": "单位",
+    "stockIn.enterMultiple": "输入多个商品（例如，",
+    "stockIn.multiPlaceholder": "土豆 10kg RWF 300, 玉米 30kg RWF 300",
+    "stockIn.defaultCost": "默认成本（RWF/单位）（可选）",
+    "stockIn.defaultSale": "默认售价（RWF/单位）（可选）",
+    "stockIn.preview": "预览",
+    "stockIn.addAllItems": "添加全部商品",
+    "stockIn.quickTemplates": "快捷模板",
+    "stockIn.timestampAuto": "日期和时间会自动添加",
+    "stockIn.addStock": "添加库存",
+    "stockIn.parseError": "无法解析输入。请使用格式：土豆 10kg RWF 300, 玉米 30kg RWF 300",
+    "stockIn.addedItems": "已添加 {count} 个商品到库存",
+    "stockIn.costFromPriceTag": "按输入价格计算成本",
+    "stockIn.enterDate": "日期",
+    "stockIn.enterTime": "时间",
+    "stockIn.costPrompt": "你希望如何输入成本？",
+    "stockIn.costMode.total": "我输入总金额",
+    "stockIn.costMode.perUnit": "我知道每{unit}价格",
+    "stockIn.totalPaid": "总支付金额 (RWF)",
+    "stockIn.totalPaidPlaceholder": "例如：整批 1200",
+    "stockIn.pricePerUnit": "每{unit}价格 (RWF)",
+    "stockIn.pricePerUnitPlaceholder": "例如：每{unit} 1.50",
+    "stockIn.salePriceOptional": "每{unit}售价 (RWF/单位)（可选）",
+    "stockIn.salePriceOptionalPlaceholder": "例如：每{unit} 2.99（可选）",
+    "stockIn.autoBreakdown": "自动计算明细",
+    "stockIn.costPer": "每{unit}成本",
+    "stockIn.totalCost": "总成本",
+    "stockOut.startTyping": "开始输入以查找商品...",
+    "stockOut.inStock": "库存",
+    "stockOut.costPrice": "成本价",
+    "stockOut.lastSalePrice": "最近售价",
+    "stockOut.howEnterSalePrice": "你希望如何输入售价？",
+    "stockOut.pricePer": "每{unit}价格",
+    "stockOut.totalReceived": "总收款",
+    "stockOut.salePricePer": "每{unit}售价 (RWF)",
+    "stockOut.totalAmountReceived": "总收款金额 (RWF)",
+    "stockOut.completeSale": "完成销售",
+    "stockOut.quickSell": "快速销售 — 常用商品",
+    "stockOut.noProducts": "没有可销售商品",
+    "stockOut.addStockFirst": "请先通过 {addStock} 添加商品，然后再回来销售。",
+    "common.inventoryManager": "库存管理",
+    "common.myShop": "我的店铺",
+    "common.admin": "管理员",
+    "stockIn.error.nameQty": "请输入商品名称和数量",
+    "stockIn.error.validCost": "请输入有效成本",
+    "stockIn.error.unitNotCompatible": "单位“{unit}”与“{productUnit}”不兼容",
+    "stockIn.success.added": "已添加 {qty} {unit} 的 {name}（库存 {stockQty} {productUnit}）",
+    "stockOut.error.selectProduct": "请选择商品",
+    "stockOut.error.enterQuantity": "请输入数量",
+    "stockOut.error.validSalePrice": "请输入有效售价",
+    "stockOut.error.unitNotCompatible": "所选单位与商品单位不兼容",
+    "stockOut.error.notEnoughStock": "库存不足！",
+    "stockOut.success.sold": "已售出 {qty} {unit} 的 {name}。剩余：{remaining} {productUnit}",
+    "inventory.error.invalidCostPrice": "成本价无效",
+    "inventory.error.invalidSalePrice": "销售价无效",
+    "inventory.success.updatedPrices": "已更新 {name} 的价格：成本 {cost}/{unit}，售价 {sale}/{unit}",
+    "common.productRemovedUndo": "已删除“{name}”，可撤销。",
+    "common.productRestored": "已恢复“{name}”",
+    "common.level.low": "低",
+    "common.level.medium": "中",
+    "common.level.good": "良好",
+    "inventory.price": "价格",
+    "inventory.base": "基础",
+    "dashboard.allWellStocked": "所有产品库存充足！",
+    "unit.piece": "件",
+    "unit.kg": "千克",
+    "unit.g": "克",
+    "unit.l": "升",
+    "unit.ml": "毫升",
+    "unit.mg": "毫克",
+    "unit.ton": "吨",
+    "unit.dozen": "打",
+    "unitFull.kg": "千克",
+    "unitFull.g": "克",
+    "unitFull.mg": "毫克",
+    "unitFull.l": "升",
+    "unitFull.ml": "毫升",
+    "unitFull.piece": "件",
+    "unitFull.dozen": "打",
+    "unitFull.ton": "吨",
+  },
+};
+const tLang = (lang, key) => I18N[lang]?.[key] ?? I18N.en?.[key] ?? key;
+const tFmtLang = (lang, key, vars = {}) => {
+  let str = tLang(lang, key);
+  Object.entries(vars).forEach(([k, v]) => {
+    str = str.replaceAll(`{${k}}`, String(v));
+  });
+  return str;
+};
+const unitLabelLang = (lang, unit) => tLang(lang, `unit.${normalizeUnit(unit)}`);
+const unitFullLang = (lang, unit) => tLang(lang, `unitFull.${normalizeUnit(unit)}`) || unitFull(unit);
+const unitType = (u) => UNIT_DEFS[normalizeUnit(u)]?.type || "count";
+const isConvertible = (from, to) => unitType(from) === unitType(to);
+const UnitIcon = ({ unit, size = 14, style }) => {
+  const u = normalizeUnit(unit);
+  const t = unitType(u);
+  // Icons8 "Fluency Systems Filled" set (filled, modern). Using PNG CDN for simplicity.
+  const ICON8 = {
+    mass: "https://img.icons8.com/fluency-systems-filled/48/weight.png",
+    volume: "https://img.icons8.com/fluency-systems-filled/48/water.png",
+    bottle: "https://img.icons8.com/fluency-systems-filled/48/wine-bottle.png",
+    box: "https://img.icons8.com/fluency-systems-filled/48/box.png",
+    bag: "https://img.icons8.com/fluency-systems-filled/48/shopping-bag.png",
+    packet: "https://img.icons8.com/fluency-systems-filled/48/package.png",
+    dozen: "https://img.icons8.com/fluency-systems-filled/48/stack.png",
+    piece: "https://img.icons8.com/fluency-systems-filled/48/filled-circle.png",
+    tag: "https://img.icons8.com/fluency-systems-filled/48/price-tag.png",
+  };
+  const src =
+    (u === "bottle" ? ICON8.bottle
+      : u === "box" ? ICON8.box
+        : u === "bag" ? ICON8.bag
+          : u === "packet" ? ICON8.packet
+            : u === "dozen" ? ICON8.dozen
+              : u === "piece" ? ICON8.piece
+                : t === "mass" ? ICON8.mass
+                  : t === "volume" ? ICON8.volume
+                    : ICON8.tag);
+
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      className="unit-ic"
+      width={size}
+      height={size}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      style={{ display: "block", width: size, height: size, objectFit: "contain", filter: "var(--unit-icon-filter)", ...style }}
+      onError={(e) => { try { e.currentTarget.style.display = "none"; } catch (_e) {} }}
+    />
+  );
+};
+const convertQty = (qty, from, to) => {
+  const f = UNIT_DEFS[normalizeUnit(from)];
+  const t = UNIT_DEFS[normalizeUnit(to)];
+  if (!f || !t || f.type !== t.type) return null;
+  return Number(qty || 0) * (f.factor / t.factor);
+};
+const convertPricePerUnit = (price, from, to) => {
+  const f = UNIT_DEFS[normalizeUnit(from)];
+  const t = UNIT_DEFS[normalizeUnit(to)];
+  if (!f || !t || f.type !== t.type) return null;
+  return Number(price || 0) * (t.factor / f.factor);
+};
+const unitsFor = (u) => {
+  const type = unitType(u);
+  return UNITS.filter(x => UNIT_DEFS[x].type === type);
+};
+const STOCK_COLORS = { high: "#22c55e", medium: "#f59e0b", low: "#ef4444" };
+const LOGO_SRC = "./assets/llogo.png";
+const POWERED_BY_LOGO_SRC = "./assets/pixel-spring.png";
+
+const levenshtein = (a, b) => {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+};
+
+const normalize = (s) => s.toLowerCase().trim().replace(/s$/, "").replace(/ies$/, "y");
+
+const fuzzyMatch = (input, products) => {
+  if (!input) return [];
+  const norm = normalize(input);
+  return products
+    .map(p => {
+      const pn = normalize(p.name);
+      const startsWith = pn.startsWith(norm);
+      const includes = pn.includes(norm);
+      const dist = levenshtein(norm, pn.slice(0, norm.length));
+      let score = dist;
+      if (startsWith) score -= 100;
+      if (includes) score -= 50;
+      score -= (p.frequency || 0) * 2;
+      return { ...p, score };
+    })
+    .filter(p => p.score < 5)
+    .sort((a, b) => a.score - b.score);
+};
+
+const parseMultiInput = (text) => {
+  const items = text.split(",").map(s => s.trim()).filter(Boolean);
+  return items.map(item => {
+    // Supported:
+    // "potato 10kg RWF 300", "maize 30 kg RWF 300", "beans 5l", "rice 20"
+    const match = item.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?(?:\s*\$\s*(\d+(?:\.\d+)?))?$/i);
+    if (match) {
+      const parsedPrice = match[4] ? parseFloat(match[4]) : null;
+      return {
+        name: match[1].trim(),
+        qty: parseFloat(match[2]),
+        unit: normalizeUnit(match[3] || "piece"),
+        totalPaid: Number.isFinite(parsedPrice) ? parsedPrice : null,
+      };
+    }
+    return null;
+  }).filter(Boolean);
+};
+
+// ─── SEED DATA (empty — user adds their own) ───
+const SEED_PRODUCTS = [];
+const genTransactions = () => [];
+
+// ─── ICONS (inline SVG) ───
+const Icons = {
+  dashboard: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
+  stockIn: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>,
+  stockOut: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>,
+  inventory: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>,
+  reports: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>,
+  search: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>,
+  alert: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  plus: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  check: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>,
+  x: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  trend: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,
+  download: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  save: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
+  edit: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  trash: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>,
+  chevron: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>,
+  menu: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
+  user: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+  bell: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>,
+  globe: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 010 20"/><path d="M12 2a15 15 0 000 20"/></svg>,
+  undo: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>,
+  uptime: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/><path d="M12 3V1"/></svg>,
+};
+
+// ─── Auto-suggest Input Component ───
+function AutoInput({ value, onChange, products, placeholder, onSelect, style, t }) {
+  const tt = t || ((k) => k);
+  const [suggestions, setSuggestions] = useState([]);
+  const [selIdx, setSelIdx] = useState(0);
+  const [showSug, setShowSug] = useState(false);
+  const ref = useRef();
+
+  useEffect(() => {
+    if (value.length > 0) {
+      const matches = fuzzyMatch(value, products).slice(0, 6);
+      setSuggestions(matches);
+      setSelIdx(0);
+      setShowSug(matches.length > 0);
+    } else {
+      setSuggestions([]);
+      setShowSug(false);
+    }
+  }, [value, products]);
+
+  const handleKey = (e) => {
+    if (e.key === "Tab" && suggestions.length > 0) {
+      e.preventDefault();
+      const s = suggestions[selIdx];
+      onChange(s.name);
+      onSelect?.(s);
+      setShowSug(false);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelIdx(i => Math.min(i + 1, suggestions.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelIdx(i => Math.max(i - 1, 0));
+    } else if (e.key === "Enter" && suggestions.length > 0 && showSug) {
+      e.preventDefault();
+      const s = suggestions[selIdx];
+      onChange(s.name);
+      onSelect?.(s);
+      setShowSug(false);
+    }
+  };
+
+  const ghost = suggestions.length > 0 && value.length > 0 ? suggestions[selIdx]?.name : "";
+  const ghostVisible = ghost && normalize(ghost).startsWith(normalize(value));
+
+  return (
+    <div style={{ position: "relative", ...style }}>
+      {ghostVisible && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+          display: "flex", alignItems: "center", padding: "0 16px",
+          color: "var(--text-ghost)", fontSize: 15, pointerEvents: "none", fontFamily: "inherit"
+        }}>
+          <span style={{ visibility: "hidden" }}>{value}</span>
+          <span>{ghost.slice(value.length)}</span>
+          <span style={{ marginLeft: 12, fontSize: 11, opacity: 0.4, background: "var(--bg-tag)", padding: "2px 6px", borderRadius: 4 }}>Tab</span>
+        </div>
+      )}
+      <input
+        ref={ref}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onKeyDown={handleKey}
+        onFocus={() => value.length > 0 && suggestions.length > 0 && setShowSug(true)}
+        onBlur={() => setTimeout(() => setShowSug(false), 200)}
+        placeholder={placeholder}
+        style={{
+          width: "100%", padding: "12px 16px", borderRadius: 12, border: "2px solid var(--border)",
+          fontSize: 15, fontFamily: "inherit", background: "transparent", color: "var(--text)",
+          outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
+        }}
+        onFocusCapture={e => e.target.style.borderColor = "var(--primary)"}
+        onBlurCapture={e => e.target.style.borderColor = "var(--border)"}
+      />
+      {showSug && suggestions.length > 0 && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+          background: "var(--popover-bg)", borderRadius: 12, marginTop: 6,
+          boxShadow: "0 18px 50px rgba(0,0,0,0.22)", border: "1px solid var(--border)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+          overflow: "hidden", maxHeight: 240, overflowY: "auto",
+        }}>
+          {suggestions.map((s, i) => (
+            <div
+              key={s.id}
+              onMouseDown={() => { onChange(s.name); onSelect?.(s); setShowSug(false); }}
+              style={{
+                padding: "10px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+                background: i === selIdx ? "var(--bg-hover)" : "transparent",
+                borderBottom: i < suggestions.length - 1 ? "1px solid var(--border-light)" : "none",
+              }}
+            >
+              <span style={{ fontWeight: 500, color: "var(--text)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span style={{ display: "inline-flex", opacity: 0.85 }}><UnitIcon unit={s.unit} size={16} /></span>
+                <span>{s.name}</span>
+              </span>
+              <span style={{ fontSize: 12, color: "var(--text-dim)", display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span>{s.stock} {s.unit}</span>
+                </span>
+                <span style={{
+                  padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                  background: s.stock < 25 ? "var(--low-bg)" : s.stock < 75 ? "var(--med-bg)" : "var(--good-bg)",
+                  color: s.stock < 25 ? "var(--low-fg)" : s.stock < 75 ? "var(--med-fg)" : "var(--good-fg)",
+                }}>{s.stock < 25 ? tt("common.level.low") : s.stock < 75 ? tt("common.level.medium") : tt("common.level.good")}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Toast ───
+function Toast({ message, type, onClose }) {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, []);
+  return (
+    <div style={{
+      position: "fixed", bottom: 24, right: 24, zIndex: 1000,
+      padding: "14px 24px", borderRadius: 14,
+      background: type === "success" ? "var(--toast-success)" : type === "error" ? "var(--toast-error)" : "var(--toast-info)",
+      color: "#fff", fontSize: 14, fontWeight: 600, boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+      animation: "slideUp 0.3s ease", display: "flex", alignItems: "center", gap: 10,
+      fontFamily: "'DM Sans', sans-serif",
+    }}>
+      {type === "success" && Icons.check}
+      {message}
+    </div>
+  );
+}
+
+// ─── Simple hash for passwords ───
+// ─── Auth Page ───
+function AuthPage({ onLogin }) {
+  const [step, setStep] = useState("auth"); // "auth" | "reset"
+  const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [shopName, setShopName] = useState("");
+  const [resetNewPass, setResetNewPass] = useState("");
+  const [resetConfirmPass, setResetConfirmPass] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+  const [isDark, setIsDark] = useState(true);
+  const emailRef = useRef(null);
+
+  const normalizeEmail = (e) => String(e || "").trim().toLowerCase();
+  const [resetCode, setResetCode] = useState("");
+  const resetKeyFor = (e) => `pwreset:${normalizeEmail(e)}`;
+
+  const simpleHash = async (str) => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(String(str || "") + "zurutracker_salt_2026");
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+  };
+  const makeOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+
+  const sendRecoveryCode = async () => {
+    setError("");
+    const e = normalizeEmail(email);
+    if (!e) return setError("Please enter your email"), void 0;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return setError("Please enter a valid email"), void 0;
+    setLoading(true);
+    try {
+      const userKey = `user:${e}`;
+      let result = null;
+      try { result = await window.storage.get(userKey); } catch (_e) {}
+      if (!result?.value) {
+        setError("No account found with this email.");
+        setLoading(false);
+        return;
+      }
+      const code = makeOtp();
+      const codeHash = await simpleHash(code);
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 min
+      await window.storage.set(resetKeyFor(e), JSON.stringify({ codeHash, expiresAt }));
+
+      const subject = encodeURIComponent("ZuriTrack password reset code");
+      const body = encodeURIComponent(`Your ZuriTrack password reset code is: ${code}\n\nThis code expires in 10 minutes.\n\nIf you didn't request this, you can ignore this email.`);
+      try { window.location.href = `mailto:${encodeURIComponent(e)}?subject=${subject}&body=${body}`; } catch (_e) {}
+
+      setStep("reset");
+      setResetCode("");
+    } catch (_e) {
+      setError("Could not send recovery code. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  const applyPasswordReset = async () => {
+    setError("");
+    const e = normalizeEmail(email);
+    if (!e) return setError("Please enter your email"), void 0;
+    if (!resetCode.trim()) return setError("Enter the 6-digit code."), void 0;
+    if (resetNewPass.length < 6) return setError("New password must be at least 6 characters."), void 0;
+    if (resetNewPass !== resetConfirmPass) return setError("Passwords do not match."), void 0;
+    setLoading(true);
+    try {
+      const rk = resetKeyFor(e);
+      const saved = await window.storage.get(rk);
+      const rec = JSON.parse(saved.value || "{}");
+      if (!rec?.expiresAt || Date.now() > rec.expiresAt) {
+        setError("Reset code expired. Please request a new code.");
+        setLoading(false);
+        return;
+      }
+      const inputHash = await simpleHash(resetCode.trim());
+      if (inputHash !== rec.codeHash) {
+        setError("Invalid code. Please try again.");
+        setLoading(false);
+        return;
+      }
+      const userKey = `user:${e}`;
+      const userRes = await window.storage.get(userKey);
+      const userData = JSON.parse(userRes.value || "{}");
+      userData.passwordHash = await simpleHash(resetNewPass);
+      userData.updatedAt = new Date().toISOString();
+      await window.storage.set(userKey, JSON.stringify(userData));
+      await window.storage.delete(rk);
+
+      onLogin(userData);
+    } catch (_e) {
+      setError("Could not reset password. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  const validate = () => {
+    setError("");
+    if (!email.trim()) return setError("Please enter your email"), false;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return setError("Please enter a valid email"), false;
+    if (password.length < 6) return setError("Password must be at least 6 characters"), false;
+    if (mode === "signup") {
+      if (!shopName.trim()) return setError("Please enter your shop name"), false;
+      if (password !== confirmPass) return setError("Passwords do not match"), false;
+    }
+    return true;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setLoading(true);
+    setError("");
+    const e = normalizeEmail(email);
+
+    try {
+      if (mode === "signup") {
+        const hashedPass = await simpleHash(password);
+        const userKey = `user:${e}`;
+        let existing = null;
+        try { existing = await window.storage.get(userKey); } catch (_e) {}
+        if (existing?.value) {
+          setError("An account with this email already exists. Please log in.");
+          setLoading(false);
+          return;
+        }
+        const userData = {
+          email: e,
+          passwordHash: hashedPass,
+          shopName: shopName.trim(),
+          role: "stock_manager",
+          avatarDataUrl: "",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await window.storage.set(userKey, JSON.stringify(userData));
+        onLogin(userData);
+      } else {
+        const hashedPass = await simpleHash(password);
+        const userKey = `user:${e}`;
+        let result = null;
+        try { result = await window.storage.get(userKey); } catch (_e) {}
+        if (!result?.value) {
+          setError("No account found with this email. Please sign up first.");
+          setLoading(false);
+          return;
+        }
+        const userData = JSON.parse(result.value || "{}");
+        if (userData.passwordHash !== hashedPass) {
+          setError("Incorrect password. Please try again.");
+          setLoading(false);
+          return;
+        }
+        onLogin(userData);
+      }
+    } catch (err) {
+      setError("Something went wrong. Please try again.");
+    }
+    setLoading(false);
+  };

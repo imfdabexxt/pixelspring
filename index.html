@@ -1,725 +1,461 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <link rel="icon" type="image/png" href="assets/nologo.png">
-
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Pixel Spring is a growth-focused marketing agency that builds structured marketing systems for service businesses visibility, lead generation, and consistent clients."
-    />
-    <title>Pixel Spring  Modern Marketing Systems</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,0,0&display=swap"
-      rel="stylesheet"
-    />
-    
+    <title>ZuriTrack JSX Runner</title>
     <style>
-      :root {
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial;
+      html,
+      body,
+      #root {
+        margin: 0;
+        width: 100%;
+        min-height: 100%;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        background: radial-gradient(1200px 600px at 50% 35%, #ffffff 0%, #f3f6ff 55%, #eef2ff 100%);
+      }
+      .boot {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #0f172a;
+        position: relative;
+        overflow: hidden;
+      }
+      .boot.hidden {
+        opacity: 0;
+        pointer-events: none;
+        transform: scale(1.01);
+        transition: opacity 240ms ease, transform 240ms ease;
+      }
+      .boot-card {
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: min(92vw, 720px);
+        padding: 22px 18px;
+      }
+
+      .boot-honeycomb {
+        position: relative;
+        width: min(360px, 78vw);
+        aspect-ratio: 1 / 1;
+        display: grid;
+        place-items: center;
+        margin: 0 auto 14px;
+      }
+
+      .hex {
+        --hex-size: 86px;
+        position: absolute;
+        width: var(--hex-size);
+        height: calc(var(--hex-size) * 0.866);
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 255, 0.92));
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        clip-path: polygon(25% 6.7%, 75% 6.7%, 100% 50%, 75% 93.3%, 25% 93.3%, 0% 50%);
+        display: grid;
+        place-items: center;
+        transform: translate(-50%, -50%);
+      }
+      .hex::after {
+        content: "";
+        position: absolute;
+        inset: 8px;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        clip-path: inherit;
+        pointer-events: none;
+      }
+      .hex.center {
+        --hex-size: 102px;
+        background: linear-gradient(180deg, #4f79ff, #2746d8);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        box-shadow: 0 18px 40px rgba(39, 70, 216, 0.22);
+      }
+      .hex.center::after {
+        border-color: rgba(255, 255, 255, 0.22);
+      }
+      .hex .dot {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.65);
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+      }
+      .hex.center .dot {
+        background: rgba(255, 255, 255, 0.72);
+      }
+      .hex .dot.tl { top: 10px; left: 18px; }
+      .hex .dot.tr { top: 10px; right: 18px; }
+      .hex .dot.br { bottom: 10px; right: 18px; }
+
+      .hex-icon {
+        width: 26px;
+        height: 26px;
+        opacity: 0.85;
+      }
+      .hex.center .hex-icon {
+        opacity: 1;
+      }
+
+      .hex-logo {
+        width: 46px;
+        height: 46px;
+        object-fit: contain;
+        display: block;
+        filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.25));
+        animation: logoPulse 2.6s ease-in-out infinite;
+      }
+
+      .boot-status {
+        margin-top: 6px;
+        font-size: 12px;
+        color: rgba(30, 41, 59, 0.78);
+        letter-spacing: 0.2px;
+        animation: fadeInUp 700ms ease both;
+      }
+
+      .boot-progress {
+        width: min(360px, 76vw);
+        height: 3px;
+        border-radius: 999px;
+        margin-top: 10px;
+        background: rgba(148, 163, 184, 0.35);
+        overflow: hidden;
+      }
+      .boot-progress > span {
+        display: block;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, rgba(79, 121, 255, 0.2), rgba(39, 70, 216, 0.95));
+        transition: width 80ms linear;
+      }
+      .boot-powered {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 18px;
+        color: rgba(30, 41, 59, 0.7);
+        font-size: 12px;
+      }
+      .boot-powered strong {
+        color: rgba(30, 41, 59, 0.9);
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
+      .boot-powered img {
+        width: 22px;
+        height: 22px;
+        object-fit: contain;
+        display: block;
+        filter: drop-shadow(0 8px 18px rgba(15, 23, 42, 0.12));
+      }
+      @keyframes logoPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.08); }
+      }
+      @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
       }
     </style>
-    <link rel="stylesheet" href="./assets/styles.css" />
-    
   </head>
-  <body class="home-page home-clean">
-    <div class="nav-wrap">
-      <nav class="nav" aria-label="Primary">
-        <a class="brand" href="#home">
-          <span class="logo" aria-hidden="true"> </span>
-          
-          <span>Pixel Spring</span>
-        </a>
+  <body>
+    <div id="boot" class="boot" aria-label="Loading screen">
+      <div class="boot-card">
+        <div class="boot-honeycomb" aria-hidden="true">
+          <!-- Top-left -->
+          <div class="hex" style="left: 43%; top: 33%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <svg class="hex-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 12.5c2.6-4.6 8.4-6.3 13-3.7" stroke="rgba(15,23,42,0.75)" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M18 11.5c-2.6 4.6-8.4 6.3-13 3.7" stroke="rgba(15,23,42,0.55)" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </div>
 
-        <div class="nav-links" role="navigation" aria-label="Site">
-          <a data-nav="true" href="#home"><img class="i8" src="https://img.icons8.com/material-rounded/18/home.png" alt="" />Home</a>
-          <a data-nav="true" href="#services"><img class="i8" src="https://img.icons8.com/material-rounded/18/services.png" alt="" />Services</a>
-          <a class="nav-offer" data-nav="true" href="#special-offers"
-            ><img class="i8" src="https://img.icons8.com/material-rounded/18/price-tag-usd.png" alt="" />Special
-            Offers <span class="nav-badge" aria-label="5 offers">5</span></a
-          >
-          <button class="btn secondary nav-menu-btn" type="button" data-open-menu="true">
-            <img class="i8" src="https://img.icons8.com/material-rounded/18/menu--v1.png" alt="" />
-            See our menu
-          </button>
-          <a data-nav="true" href="#case-studies"><img class="i8" src="https://img.icons8.com/material-rounded/18/combo-chart--v1.png" alt="" />Case Studies</a>
-          <a data-nav="true" href="#about"><img class="i8" src="https://img.icons8.com/material-rounded/18/info.png" alt="" />About</a>
-          <a data-nav="true" href="#contact"><img class="i8" src="https://img.icons8.com/material-rounded/18/new-post.png" alt="" />Contact</a>
-          <a class="btn accent" href="https://wa.me/250788700526">
-            <img class="i8" src="https://img.icons8.com/material-rounded/18/calendar--v1.png" alt="" />
-            Book Consultation <span class="arrow" aria-hidden="true">→</span>
-          </a>
+          <!-- Top -->
+          <div class="hex" style="left: 57%; top: 33%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <svg class="hex-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 4v5" stroke="rgba(15,23,42,0.75)" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M12 15v5" stroke="rgba(15,23,42,0.55)" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M7 12h10" stroke="rgba(15,23,42,0.6)" stroke-width="2.2" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="2.2" fill="rgba(15,23,42,0.15)" stroke="rgba(15,23,42,0.45)" stroke-width="1.6"/>
+            </svg>
+          </div>
+
+          <!-- Top-right -->
+          <div class="hex" style="left: 71%; top: 33%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <svg class="hex-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M8 16c0-3 2.4-5.5 5.5-5.5S19 13 19 16" stroke="rgba(15,23,42,0.65)" stroke-width="2.2" stroke-linecap="round"/>
+              <circle cx="13.5" cy="9.2" r="2.6" fill="rgba(15,23,42,0.12)" stroke="rgba(15,23,42,0.55)" stroke-width="1.8"/>
+            </svg>
+          </div>
+
+          <!-- Left -->
+          <div class="hex" style="left: 36%; top: 50%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <svg class="hex-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 8a6 6 0 0 1 9.6 7.1" stroke="rgba(15,23,42,0.7)" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M16.5 15.5l1.8 1.8" stroke="rgba(15,23,42,0.55)" stroke-width="2.2" stroke-linecap="round"/>
+              <circle cx="11" cy="12" r="2.8" fill="rgba(15,23,42,0.08)" stroke="rgba(15,23,42,0.45)" stroke-width="1.8"/>
+            </svg>
+          </div>
+
+          <!-- Center -->
+          <div class="hex center" style="left: 50%; top: 50%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <img class="hex-logo" src="./assets/llogo.png" alt="ZuriTrack" onerror="this.style.display='none'" />
+          </div>
+
+          <!-- Right -->
+          <div class="hex" style="left: 64%; top: 50%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <svg class="hex-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 14c0-2.8 2.3-5 5.1-5 2.2 0 4.2 1.4 4.8 3.4" stroke="rgba(15,23,42,0.7)" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M9.2 16.5h7.6" stroke="rgba(15,23,42,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+              <circle cx="18.2" cy="12.4" r="1.6" fill="rgba(15,23,42,0.18)"/>
+            </svg>
+          </div>
+
+          <!-- Bottom-left -->
+          <div class="hex" style="left: 43%; top: 67%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <svg class="hex-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M8 15c1.6 1.6 4.4 1.6 6 0" stroke="rgba(15,23,42,0.6)" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M10 9h.01" stroke="rgba(15,23,42,0.65)" stroke-width="3.2" stroke-linecap="round"/>
+              <path d="M14 9h.01" stroke="rgba(15,23,42,0.65)" stroke-width="3.2" stroke-linecap="round"/>
+            </svg>
+          </div>
+
+          <!-- Bottom -->
+          <div class="hex" style="left: 57%; top: 67%;">
+            <span class="dot tl"></span><span class="dot tr"></span><span class="dot br"></span>
+            <svg class="hex-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 12h10" stroke="rgba(15,23,42,0.65)" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M12 7v10" stroke="rgba(15,23,42,0.55)" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </div>
         </div>
 
-        <button
-          class="nav-toggle"
-          type="button"
-          aria-label="Open menu"
-          aria-expanded="false"
-          data-mobile-toggle="true"
-        >
-          <svg width="20" height="20" style="color: black; " viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M4 7h16M4 12h16M4 17h16"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
-      </nav>
+        <div class="boot-status">Finding lookalikes</div>
+        <div class="boot-progress" aria-label="Loading progress"><span></span></div>
 
-      <div class="mobile-panel" data-mobile-panel="true">
-        <div class="card">
-          <a data-nav="true" href="#home">Home</a>
-          <a data-nav="true" href="#services">Services</a>
-          <a class="nav-offer" data-nav="true" href="#special-offers"
-            >Special Offers <span class="nav-badge" aria-label="5 offers">5</span></a
-          >
-          <button class="btn secondary" type="button" data-open-menu="true" style="width: 100%; justify-content: flex-start">
-            See our menu
-          </button>
-          <a data-nav="true" href="#case-studies">Case Studies</a>
-          <a data-nav="true" href="#about">About</a>
-          <a data-nav="true" href="#contact">Contact</a>
-          <div class="mobile-actions">
-            <a class="btn accent" href="#contact">Book Consultation →</a>
-            <a class="btn secondary" href="#services">View Services</a>
-          </div>
+        <div class="boot-powered" aria-label="Powered by PixelSpring">
+          <span>Powered by</span>
+          <img src="./logo/pixelspringlogo.png" alt="PixelSpring" onerror="this.style.display='none'" />
+          <strong>Pixelspring</strong>
+        </div>
+      </div>
+    </div>
+
+    <div id="fatal" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(2,6,23,0.92); color:#fff; padding:18px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">
+      <div style="max-width:1100px; margin:0 auto;">
+        <div style="font-size:14px; font-weight:800; letter-spacing:0.4px; margin-bottom:10px;">ZuriTrack crashed</div>
+        <div style="font-size:12px; opacity:0.9; margin-bottom:12px;">Developer debug screen (enabled via <code>?debug=1</code>).</div>
+        <pre id="fatalText" style="white-space:pre-wrap; line-height:1.35; font-size:12px; background:rgba(255,255,255,0.06); border:1px solid rgba(148,163,184,0.35); border-radius:12px; padding:12px; overflow:auto; max-height:60vh;"></pre>
+        <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+          <button id="fatalReload" style="padding:10px 14px; border-radius:10px; border:1px solid rgba(148,163,184,0.4); background:rgba(255,255,255,0.08); color:#fff; cursor:pointer;">Reload</button>
+          <button id="fatalClose" style="padding:10px 14px; border-radius:10px; border:1px solid rgba(148,163,184,0.4); background:rgba(255,255,255,0.08); color:#fff; cursor:pointer;">Hide</button>
         </div>
       </div>
     </div>
 
-    <header class="section home-saas" id="home" data-section="home">
-      <div class="container">
-        <div class="saas-hero reveal">
-          <div class="saas-left">
-            <div class="pill">
-              <span class="dot" aria-hidden="true"></span>
-              Where visibility becomes revenue
-            </div>
-            <h1>Unlock Smarter, Faster Client Growth with Pixel Spring</h1>
-            <p>
-              Structured marketing systems for service businesses: visibility, lead flow, and conversion in one clear
-              operating model.
-            </p>
-            <div class="hero-actions">
-              <a class="btn accent" href="#contact">
-                <span class="ms" aria-hidden="true">calendar_month</span>
-                Book Consultation
-              </a>
-              <a class="btn secondary" href="#services">
-                <span class="ms" aria-hidden="true">view_module</span>
-                Get Started
-              </a>
-            </div>
+    <div id="root"></div>
 
-            <div class="saas-metrics">
-              <div class="saas-stat">
-                <div class="num" data-count="90">99%</div>
-                <div class="txt">Higher quality lead rate</div>
-              </div>
-              <div class="saas-stat">
-                <div class="num" data-count="3" data-suffix=" mo">3 months </div>
-                <div class="txt">Structured growth cycle</div>
-              </div>
-              <div class="saas-stat">
-                <div class="num green" id="green" data-count="249" data-prefix="+">+0%</div>
-                <div class="txt">Typical inquiry lift</div>
-              </div>
-            </div>
-          </div>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-          <div class="saas-right">
-            <div class="top-card">
-              <h3>Scale your client pipeline, not your stress.</h3>
-              <a class="btn primary" href="#contact">
-                <span class="ms" aria-hidden="true">north_east</span>
-                Get Started
-              </a>
-            </div>
-
-            <div class="person-panel">
-              <div class="chart-card c1">
-                <strong>Market Sales</strong>
-                <div class="axis-chart" data-axis-chart="true">
-                  <div class="axis y" aria-hidden="true">
-                    <span>100</span><span>75</span><span>50</span><span>25</span><span>0</span>
-                  </div>
-                  <div class="axis x" aria-hidden="true">
-                    <span>W1</span><span>W2</span><span>W3</span><span>W4</span><span>W5</span>
-                  </div>
-
-                  <div class="plot" aria-hidden="true">
-                    <span class="bar b1" style="--v: 28"></span>
-                    <span class="bar b2" style="--v: 44"></span>
-                    <span class="bar b3" style="--v: 56"></span>
-                    <span class="bar b4" style="--v: 71"></span>
-                    <span class="bar b5" style="--v: 84"></span>
-                    <svg class="trend" viewBox="0 0 100 60" preserveAspectRatio="none">
-                      <polyline class="trend-line" points="6,48 28,38 50,30 72,18 94,10" />
-                      <circle class="pt" cx="6" cy="48" r="1.9" />
-                      <circle class="pt" cx="28" cy="38" r="1.9" />
-                      <circle class="pt" cx="50" cy="30" r="1.9" />
-                      <circle class="pt" cx="72" cy="18" r="1.9" />
-                      <circle class="pt" cx="94" cy="10" r="1.9" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-              <div class="chart-card c2">
-                <strong>Audience Expand</strong>
-                <div class="linear-bars compact">
-                  <div class="lb-row">
-                    <span class="lb-label">Awareness</span>
-                    <span class="lb-track"><span class="lb-fill alt" data-auto-fill="58"></span></span>
-                  </div>
-                  <div class="lb-row">
-                    <span class="lb-label">Leads</span>
-                    <span class="lb-track"><span class="lb-fill alt" data-auto-fill="69"></span></span>
-                  </div>
-                  <div class="lb-row">
-                    <span class="lb-label">Conversion</span>
-                    <span class="lb-track"><span class="lb-fill alt" data-auto-fill="76"></span></span>
-                  </div>
-                </div>
-              </div>
-              <div class="avatar-block" aria-hidden="true">
-                <img
-                  class="avatar-photo"
-                  src="assets\avatar.png"
-                  alt="Pixel Spring team"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="brand-strip reveal">
-          <span>Service Operators</span>
-          <span>Local Businesses</span>
-          <span>Growth Teams</span>
-          <span>Founders</span>
-          <span>Agency Partners</span>
-        </div>
-      </div>
-    </header>
-
-    <main>
-      <section class="section compact productivity-section">
-        <div class="container">
-          <div class="section-head reveal">
-            <div>
-              <h2>Productivity Growth in 3 Months</h2>
-              <p>Three strategically structured phases designed to significantly enhance marketing performance, accelerate lead response time, 
-                and improve overall conversion efficiency.</p>
-            </div>
-          </div>
-
-          <div class="grid productivity-graphs">
-            <article class="card pad reveal p-graph">
-              <h3>Month 1 : Foundation Setup</h3>
-              <p>Core visibility channels are optimized, brand positioning is refined, and campaign structures are streamlined for clarity and performance.</p>
-              <div class="line-graph visibility-holder">
-                
-              </div>
-              <small>Productivity increase: <strong>+18%</strong></small>
-            </article>
-
-            <article class="card pad reveal p-graph">
-              <h3>Month 2 : System Automation</h3>
-              <p>Lead generation funnels are implemented and follow-up processes are automated across key communication channels to ensure faster engagement and consistent</p>
-              <div class="line-graph productivity-holder">
-               
-              </div>
-              <small>Productivity increase: <strong>+31%</strong></small>
-            </article>
-
-            <article class="card pad reveal p-graph">
-              <h3>Month 3 : Scale & Conversion</h3>
-              <p>Marketing decisions become fully data-driven, improved targeting, and more efficient client acquisition cycles with higher conversion rates..</p>
-              <div class="line-graph scale-holder ">
-                
-              </div>
-              <small>Productivity increase: <strong>+47%</strong></small>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section compact" id="services" data-section="services">
-        <div class="container">
-          <div class="problem-hero reveal">
-            <div class="problem-copy">
-              <div class="pill">
-                <span class="dot" aria-hidden="true"></span>
-                The real reason marketing feels “random”
-              </div>
-              <h2 id="why" style="margin-top: 14px">Why Most Businesses Struggle With Marketing</h2>
-              <p id="whydes">
-                Marketing breaks when efforts are fragmented, reactive, and unsupported by a clear strategy. Most businesses
-                don’t have a defined customer journey, a repeatable acquisition system, or simple performance benchmarks 
-                so visibility and leads fluctuate.
-              </p>
-
-              <div class="problem-bullets">
-                <div class="pb">
-                  <span class="ms">check_circle</span>
-                  <div>
-                    <strong>Unclear positioning</strong>
-                    <span>Customers don’t instantly understand why you’re the best choice.</span>
-                  </div>
-                </div>
-                <div class="pb">
-                  <span class="ms">check_circle</span>
-                  <div>
-                    <strong>No system for leads</strong>
-                    <span>No consistent pipeline from attention → inquiry → booked client.</span>
-                  </div>
-                </div>
-                <div class="pb">
-                  <span class="ms">check_circle</span>
-                  <div>
-                    <strong>Weak follow‑up</strong>
-                    <span>Slow responses and missed steps reduce conversion drastically.</span>
-                  </div>
-                </div>
-                <div class="pb">
-                  <span class="ms">check_circle</span>
-                  <div>
-                    <strong>No measurement</strong>
-                    <span>Without tracking, decisions become guesswork and spend gets wasted.</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="problem-media" aria-hidden="true">
-              <img
-                src="https://plus.unsplash.com/premium_photo-1770375761484-ad322deba414?auto=format&fit=crop&w=1400&q=70"
-                alt=""
-                loading="lazy"
-              />
-              <div class="problem-overlay-card">
-                <div class="k">Fix the system</div>
-                <div class="v">Visibility → Funnel → Follow‑up → Conversion</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="grid cards-4" style="margin-top: 22px">
-            <article class="card pad reveal">
-              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">visibility</span></div>
-              <h3 class="card-title">Low Online Visibility</h3>
-              <p>Customers can’t find you consistently across search, maps, and social.</p>
-            </article>
-            <article class="card pad reveal">
-              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">shuffle</span></div>
-              <h3 class="card-title">Random Marketing Efforts</h3>
-              <p>Posting and ads without strategy creates motion  not momentum.</p>
-            </article>
-            <article class="card pad reveal">
-              <div class="icon orange" aria-hidden="true"><span class="ms" aria-hidden="true">account_tree</span></div>
-              <h3 class="card-title">No Client Acquisition System</h3>
-              <p>No clear path from attention → lead → booked client.</p>
-            </article>
-            <article class="card pad reveal">
-              <div class="icon" aria-hidden="true"><span class="ms" aria-hidden="true">show_chart</span></div>
-              <h3 class="card-title">Inconsistent Lead Flow</h3>
-              <p>Unstable pipelines make staffing, cash flow, and growth feel uncertain.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section offers-section" id="special-offers" data-section="special-offers">
-        <div class="container">
-          <div class="offers-head reveal">
-            <div class="pill" style="background: rgba(255, 0, 0, 0.09); border-color: rgba(255, 0, 0, 0.22)">
-              <span class="dot" aria-hidden="true" style="background: #ff2d2d; box-shadow: 0 0 0 4px rgba(255,45,45,.14), 0 0 26px rgba(255,45,45,.18)"></span>
-              Special Offers
-            </div>
-            <h2 style="margin-top: 12px">Quick Business solution, High‑value packages (RWF)</h2>
-            <p style="max-width: 70ch; margin-bottom: 0">
-              Transparent pricing designed to help service businesses start fast and scale with systems.
-            </p>
-            <div class="offer-countdown card reveal" data-offer-countdown="true" aria-label="Offer countdown timer">
-              <div class="oc-top">
-                <div class="oc-title">
-                  <span class="ms" aria-hidden="true">schedule</span>
-                  Get them at the right price before demand increases
-                </div>
-                <div class="oc-badge">Live</div>
-              </div>
-
-              <div class="oc-grid" aria-hidden="true">
-                <div class="oc-box">
-                  <div class="oc-num" data-oc="days">06</div>
-                  <div class="oc-label">Days</div>
-                </div>
-                <div class="oc-sep">:</div>
-                <div class="oc-box">
-                  <div class="oc-num" data-oc="hours">03</div>
-                  <div class="oc-label">Hours</div>
-                </div>
-                <div class="oc-sep">:</div>
-                <div class="oc-box">
-                  <div class="oc-num" data-oc="minutes">38</div>
-                  <div class="oc-label">Minutes</div>
-                </div>
-                <div class="oc-sep">:</div>
-                <div class="oc-box">
-                  <div class="oc-num" data-oc="seconds">00</div>
-                  <div class="oc-label">Seconds</div>
-                </div>
-              </div>
-
-              <small class="oc-sub"> pricing is always shown, but the timer keeps it time-sensitive.</small>
-            </div>
-            <br>
-          </div>
-
-          <div class="grid offers-grid">
-            <article class="card pad reveal offer-card">
-              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
-                <span class="ms">hub</span>
-              </div>
-              <h3 class="card-title">Client Relationship Management System</h3>
-              <p>We offer Client relationship management system from <strong>100,000 RWF</strong> – <strong>500,000 RWF</strong> depending on the system load.</p>
-            </article>
-
-            <article class="card pad reveal offer-card">
-              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
-                <span class="ms">language</span>
-              </div>
-              <h3 class="card-title">Business Website</h3>
-              <p>Professional website from <strong>150,000 RWF</strong> to <strong>250,000 RWF</strong>.</p>
-            </article>
-
-            <article class="card pad reveal offer-card">
-              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
-                <span class="ms">storefront</span>
-              </div>
-              <h3 class="card-title">Online Store</h3>
-              <p>Online store only for <strong>95,000 RWF</strong>.</p>
-            </article>
-
-            <article class="card pad reveal offer-card">
-              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
-                <span class="ms">visibility</span>
-              </div>
-              <h3 class="card-title">Google Visibility</h3>
-              <p>Visibility pack only (separately) for <strong>150,000 RWF</strong>.</p>
-            </article>
-
-            <article class="card pad reveal offer-card">
-              <div class="icon" aria-hidden="true" style="background: rgba(255,45,45,.10); border-color: rgba(255,45,45,.22)">
-                <span class="ms">search</span>
-              </div>
-              <h3 class="card-title">Search Engine Optimization</h3>
-              <p>Search engine optimization for <strong>200,000 RWF</strong>.</p>
-            </article>
-
-            <article class="card glow pad reveal offer-card" style="grid-column: 1 / -1">
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap">
-                <div>
-                  <h3 style="margin: 0 0 6px">Want the right package?</h3>
-                  <p style="margin: 0">Message us and we’ll recommend the best offer for your business.</p>
-                </div>
-                <a class="btn accent" href="https://wa.me/250788700526">
-                  <img class="i8" src="https://img.icons8.com/material-rounded/18/whatsapp.png" alt="" />
-                  WhatsApp Us <span class="arrow">→</span>
-                </a>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" data-section="services">
-        <div class="container">
-          <div class="section-head reveal">
-            <div>
-              <h2>The Pixel Spring 3-Month Growth System</h2>
-              <p>A focused, structured plan designed to compound results visibility first, then systems, then conversion.</p>
-            </div>
-            <a class="btn primary reveal" href="#services">
-              <span class="ms" aria-hidden="true">rocket_launch</span>
-              See the Program <span class="arrow">→</span>
-            </a>
-          </div>
-
-          <div class="grid cards-3">
-            <article class="card glow pad reveal">
-              <div class="pill" style="background: rgba(43, 124, 255, 0.08); border-color: rgba(43, 124, 255, 0.2)">
-                <span class="dot" aria-hidden="true"></span>
-                Month 1  Visibility
-              </div>
-              <h3 class="card-title">Improve online presence and local discovery.</h3>
-              <p>Optimize where people search, and build consistent signals that increase trust and discovery.</p>
-            </article>
-
-            <article class="card glow pad reveal">
-              <div class="pill" style="background: rgba(43, 124, 255, 0.08); border-color: rgba(43, 124, 255, 0.2)">
-                <span class="dot" aria-hidden="true"></span>
-                Month 2  System Building
-              </div>
-              <h3 class="card-title">Create lead funnels and marketing systems.</h3>
-              <p>Build a repeatable pipeline that captures intent and turns attention into qualified leads.</p>
-            </article>
-
-            <article class="card glow pad reveal">
-              <div class="pill" style="background: rgba(255, 138, 61, 0.08); border-color: rgba(255, 138, 61, 0.22)">
-                <span class="dot" aria-hidden="true" style="background: var(--orange); box-shadow: 0 0 0 4px rgba(255,138,61,.15), 0 0 24px rgba(255,138,61,.22)"></span>
-                Month 3  Growth & Client Conversion
-              </div>
-              <h3 class="card-title">Turn leads into consistent paying clients.</h3>
-              <p>Refine messaging, offers, and follow-up so leads convert predictably  without chaos.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section compact">
-        <div class="container">
-          <div class="section-head reveal">
-            <div>
-              <h2>Businesses We Help</h2>
-              <p>Pixel Spring works with service businesses that want a premium, consistent client pipeline.we worldwide</p>
-            </div>
-          </div>
-
-          <div class="grid industries">
-            <div class="industry reveal"><div class="i">🏡</div><div class="label">Real Estate Agencies</div></div>
-<div class="industry reveal"><div class="i">🚗</div><div class="label">Car Dealerships</div></div>
-<div class="industry reveal"><div class="i">🏗️</div><div class="label">Construction Companies</div></div>
-<div class="industry reveal"><div class="i">🎨</div><div class="label">Interior Designers</div></div>
-<div class="industry reveal"><div class="i">🏨</div><div class="label">Hotels</div></div>
-<div class="industry reveal"><div class="i">🛏️</div><div class="label">Airbnb Hosts</div></div>
-<div class="industry reveal"><div class="i">✈️</div><div class="label">Travel Agencies</div></div>
-<div class="industry reveal"><div class="i">🛍️</div><div class="label">E-commerce Stores</div></div>
-<div class="industry reveal"><div class="i">👕</div><div class="label">Clothing Brands</div></div>
-<div class="industry reveal"><div class="i">🎓</div><div class="label">Coaches & Consultants</div></div>
-
-<div class="industry reveal"><div class="i">⚖️</div><div class="label">Law Firms</div></div>
-<div class="industry reveal"><div class="i">🦷</div><div class="label">Dental Clinics</div></div>
-<div class="industry reveal"><div class="i">🏥</div><div class="label">Medical Clinics</div></div>
-<div class="industry reveal"><div class="i">🧑‍🏫</div><div class="label">Tutoring Centers</div></div>
-<div class="industry reveal"><div class="i">📸</div><div class="label">Photographers</div></div>
-<div class="industry reveal"><div class="i">🎥</div><div class="label">Videographers</div></div>
-<div class="industry reveal"><div class="i">💄</div><div class="label">Beauty Brands</div></div>
-<div class="industry reveal"><div class="i">💈</div><div class="label">Barbershops</div></div>
-<div class="industry reveal"><div class="i">🚚</div><div class="label">Logistics Companies</div></div>
-<div class="industry reveal"><div class="i">📦</div><div class="label">Moving Companies</div></div>
-
-<div class="industry reveal"><div class="i">🔧</div><div class="label">Repair Services</div></div>
-<div class="industry reveal"><div class="i">💻</div><div class="label">IT Services</div></div>
-<div class="industry reveal"><div class="i">🚀</div><div class="label">Startups</div></div>
-<div class="industry reveal"><div class="i">📚</div><div class="label">Educational Centers</div></div>
-<div class="industry reveal"><div class="i">🧠</div><div class="label">Online Course Creators</div></div>
-<div class="industry reveal"><div class="i">🤝</div><div class="label">Nonprofits</div></div>
-<div class="industry reveal"><div class="i">📊</div><div class="label">Finance Firms</div></div>
-<div class="industry reveal"><div class="i">📈</div><div class="label">Accounting Firms</div></div>
-<div class="industry reveal"><div class="i">⚡</div><div class="label">Electricians</div></div>
-<div class="industry reveal"><div class="i">🚿</div><div class="label">Plumbing Services</div></div>
-
-<div class="industry reveal"><div class="i">🧱</div><div class="label">Masonry Services</div></div>
-<div class="industry reveal"><div class="i">🪟</div><div class="label">Window Installers</div></div>
-<div class="industry reveal"><div class="i">🧹</div><div class="label">Janitorial Services</div></div>
-<div class="industry reveal"><div class="i">🌿</div><div class="label">Landscaping Companies</div></div>
-<div class="industry reveal"><div class="i">🌳</div><div class="label">Tree Services</div></div>
-<div class="industry reveal"><div class="i">🐶</div><div class="label">Pet Grooming</div></div>
-<div class="industry reveal"><div class="i">🐾</div><div class="label">Veterinary Clinics</div></div>
-<div class="industry reveal"><div class="i">🍰</div><div class="label">Bakeries</div></div>
-<div class="industry reveal"><div class="i">☕</div><div class="label">Coffee Shops</div></div>
-<div class="industry reveal"><div class="i">🍔</div><div class="label">Fast Food Chains</div></div>
-
-<div class="industry reveal"><div class="i">🍕</div><div class="label">Pizza Shops</div></div>
-<div class="industry reveal"><div class="i">🥗</div><div class="label">Healthy Food Brands</div></div>
-<div class="industry reveal"><div class="i">🏫</div><div class="label">Private Schools</div></div>
-<div class="industry reveal"><div class="i">🎤</div><div class="label">Event Hosts</div></div>
-<div class="industry reveal"><div class="i">🎧</div><div class="label">Music Producers</div></div>
-<div class="industry reveal"><div class="i">🎶</div><div class="label">Recording Studios</div></div>
-<div class="industry reveal"><div class="i">📢</div><div class="label">Advertising Agencies</div></div>
-<div class="industry reveal"><div class="i">🖨️</div><div class="label">Printing Services</div></div>
-<div class="industry reveal"><div class="i">📦</div><div class="label">Packaging Companies</div></div>
-<div class="industry reveal"><div class="i">🏢</div><div class="label">Corporate Offices</div></div>
-
-<div class="industry reveal"><div class="i">🏬</div><div class="label">Retail Stores</div></div>
-<div class="industry reveal"><div class="i">🛒</div><div class="label">Supermarkets</div></div>
-<div class="industry reveal"><div class="i">💳</div><div class="label">Payment Services</div></div>
-<div class="industry reveal"><div class="i">🏦</div><div class="label">Banks</div></div>
-<div class="industry reveal"><div class="i">📱</div><div class="label">Mobile App Companies</div></div>
-<div class="industry reveal"><div class="i">🌐</div><div class="label">Web Agencies</div></div>
-<div class="industry reveal"><div class="i">🔒</div><div class="label">Security Services</div></div>
-<div class="industry reveal"><div class="i">📡</div><div class="label">Telecom Companies</div></div>
-<div class="industry reveal"><div class="i">🚕</div><div class="label">Taxi Services</div></div>
-<div class="industry reveal"><div class="i">🚌</div><div class="label">Transport Services</div></div>
-
-<div class="industry reveal"><div class="i">🏍️</div><div class="label">Motorcycle Dealerships</div></div>
-<div class="industry reveal"><div class="i">🚲</div><div class="label">Bike Shops</div></div>
-<div class="industry reveal"><div class="i">🔋</div><div class="label">Energy Companies</div></div>
-<div class="industry reveal"><div class="i">🌞</div><div class="label">Solar Companies</div></div>
-<div class="industry reveal"><div class="i">🏭</div><div class="label">Manufacturers</div></div>
-<div class="industry reveal"><div class="i">📊</div><div class="label">Consulting Firms</div></div>
-<div class="industry reveal"><div class="i">💼</div><div class="label">Recruitment Agencies</div></div>
-<div class="industry reveal"><div class="i">🧾</div><div class="label">Tax Services</div></div>
-<div class="industry reveal"><div class="i">📑</div><div class="label">Legal Consultants</div></div>
-<div class="industry reveal"><div class="i">🧑‍💻</div><div class="label">Freelancers</div></div>
-<div class="industry reveal"><div class="i">📦</div><div class="label">Packaging Companies</div></div>
-<div class="industry reveal"><div class="i">🏢</div><div class="label">Corporate Offices</div></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="case-studies" data-section="case-studies">
-        <div class="container">
-          <div class="section-head reveal">
-            <div>
-              <h2>Case Studies</h2>
-              <p>Real businesses. Structured systems. Measurable growth outcomes.</p>
-            </div>
-          </div>
-          <div class="grid cards-3">
-            <article class="card pad reveal">
-              <div class="icon"><span class="ms">cleaning_services</span></div>
-              <h3 class="card-title">Jaki’s Tidy  Cleaning Service</h3>
-              <div class="line-graph jaki-holder">
-              </div>
-              <p><strong>Problem:</strong> Low visibility and inconsistent customers.</p>
-              <p><strong>Strategy:</strong> Lead generation funnel + visibility system.</p>
-              <p><strong>Result:</strong> Increase in customer inquiries.</p>
-            </article>
-            <article class="card pad reveal">
-              <div class="icon orange"><span class="ms">spa</span></div>
-              <h3 class="card-title">Dvine Spa</h3>
-              <div class="line-graph dvine-holder">
-              </div>
-              <p><strong>Problem:</strong> Weak marketing presence.</p>
-              <p><strong>Strategy:</strong> Brand positioning + targeted campaigns.</p>
-              <p><strong>Result:</strong> Higher booking rates.</p>
-            </article>
-            <article class="card pad reveal">
-              <div class="icon"><span class="ms">analytics</span></div>
-              <h3 class="card-title">How We Deliver</h3>
-              <div class="line-graph delivary-holder">
-              </div>
-              <p>Audit, system design, launch, then optimization with weekly visibility and conversion reporting.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section compact" id="about" data-section="about">
-        <div class="container">
-          <div class="card pad reveal">
-            <section class="about-container white-theme">
-              <div class="about-content reveal">
-                <h2>About Pixel Spring</h2>
-                <!-- Illustration placeholder -->
-                <div class="about-illustration">
-                  <img id="aboutt" src="assets/logo.png" alt="Marketing illustration" />
-                </div>
-            
-                <p>
-                  Pixel Spring is a forward-thinking marketing agency dedicated to building fully structured and scalable marketing systems for service-oriented businesses. 
-                  Unlike conventional marketing approaches that rely on random campaigns or sporadic tactics, we focus on creating repeatable, data-driven strategies that generate consistent results.
-                </p>
-                <p>
-                  Our approach combines strategic planning, automated lead generation systems, and performance-driven execution. 
-                  By implementing structured processes, we ensure every business touchpoint is optimized for visibility, engagement, and conversion. 
-                  We believe that sustainable growth comes from clarity, repeatable systems, and measurable outcomes, not short-lived marketing experiments.
-                </p>
-                <h3>Our Mission</h3>
-                <p>
-                  To empower businesses of all sizes to grow confidently and predictably by leveraging intelligent marketing systems, optimized workflows, and actionable insights. 
-                  Our mission is to transform random marketing into a strategic engine that consistently drives leads, builds brand authority, and maximizes ROI.
-                </p>
-              </div>
-            </section>
-          </div>
-        </div>
-      </section>
-
-      <section class="section cta" id="contact" data-section="contact">
-        <div class="container">
-          <div class="card panel reveal">
-            <div>
-              <h2>Ready to Grow Your Business?</h2>
-              <p>Book a consultation and we’ll map a clear 3‑month plan built around visibility, systems, and conversion. phone call available all time 24/7 .</p>
-            </div>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap">
-              <a class="btn accent" href="https://wa.me/250788700526">
-                <span class="ms" aria-hidden="true">calendar_month</span>
-                Book a Consultation <span class="arrow">→</span>
-              </a>
-              <a class="btn secondary" href="mailto:pixelspring1@gmail.com">
-                <span class="ms" aria-hidden="true">auto_stories</span>
-                pixelspring1@gmail.com
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-    
-    <footer>
-      <div class="container">
-        <div class="footer-grid">
-          <div>
-            <a class="brand" href="#home">
-              <span id="spanlogo" class="logo" aria-hidden="true"></span>
-              <span>Pixel Spring</span>
-            </a>
-            <br><br><br><br>
-            <p style="margin-top: 10px; margin-bottom: 0">
-              Pixel Spring <br> Premium marketing systems for service businesses. We specialize in structured visibility, lead generation, and consistent client acquisition. Built for strategy, efficiency, and long-term growth.
-<br><br>
-© 2026 Pixel Spring. All rights reserved.
-<br> <br>
-Contact us:<strong> +250 788 700 526 </strong> |<strong> pixelspring1@gmail.com </strong>
-            </p>
-           
-          </div>
-          <div class="footer-links" aria-label="Footer">
-            <a href="#services">Services</a>
-            <a href="#special-offers">Special Offers</a>
-            <a href="#case-studies">Case Studies</a>
-            <a href="#about">About</a>
-            <a href="#contact">Contact</a>
-          </div>
-        </div>
-      </div>
-    </footer>
-
-    <script src="./assets/main.js"></script>
-    <div class="modal" data-menu-modal="true" aria-hidden="true">
-      <div class="modal-backdrop" data-close-menu="true"></div>
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="Pixel Spring menu">
-        <div class="modal-head">
-          <div class="modal-title">
-            <img class="modal-logo" src="./assets/logo.png" alt="" aria-hidden="true" />
-            Pixel Spring Menu
-          </div>
-          <button class="modal-close" type="button" aria-label="Close menu" data-close-menu="true">
-            <span class="ms" aria-hidden="true">close</span>
-          </button>
-        </div>
-        <div class="modal-body">
-          <img class="menu-img" src="./assets/menu.jpg" alt="Pixel Spring pricing menu" />
-        </div>
-      </div>
-    </div>
     <script>
-      document.getElementById("year").textContent = new Date().getFullYear();
+      const bootStartedAt = Date.now();
+      const bootEl = document.getElementById("boot");
+      const bootBarEl = bootEl ? bootEl.querySelector(".boot-progress > span") : null;
+      const fatalEl = document.getElementById("fatal");
+      const fatalTextEl = document.getElementById("fatalText");
+      const debugEnabled = (() => {
+        try {
+          const q = new URLSearchParams(window.location.search || "");
+          return q.get("debug") === "1";
+        } catch (_e) {
+          return false;
+        }
+      })();
+
+      function showFatal(errLike) {
+        try {
+          const msg = (errLike && (errLike.stack || errLike.message)) ? (errLike.stack || errLike.message) : String(errLike);
+          // Always log for debugging, but only show overlay when explicitly enabled.
+          console.error(errLike);
+          if (debugEnabled) {
+            if (fatalTextEl) fatalTextEl.textContent = msg;
+            if (fatalEl) fatalEl.style.display = "block";
+          } else {
+            const root = document.getElementById("root");
+            if (root && !root.__zt_friendly_error_shown) {
+              root.__zt_friendly_error_shown = true;
+              root.innerHTML =
+                '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,system-ui,sans-serif;">' +
+                '<div style="max-width:520px;width:100%;background:rgba(255,255,255,0.85);border:1px solid rgba(148,163,184,0.35);border-radius:16px;padding:18px 16px;box-shadow:0 18px 50px rgba(2,6,23,0.18);">' +
+                '<div style="font-weight:800;font-size:16px;color:#0f172a;margin-bottom:6px;">Something went wrong</div>' +
+                '<div style="font-size:13px;color:rgba(15,23,42,0.72);line-height:1.5;">Please reload the app. If the problem continues, contact support.</div>' +
+                '<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">' +
+                '<button onclick="location.reload()" style="padding:10px 12px;border-radius:12px;border:1px solid rgba(148,163,184,0.45);background:#0f172a;color:#fff;font-weight:700;cursor:pointer;">Reload</button>' +
+                '</div>' +
+                '</div></div>';
+            }
+          }
+        } catch (_e) {}
+      }
+
+      window.addEventListener("error", (e) => showFatal(e?.error || e?.message || e));
+      window.addEventListener("unhandledrejection", (e) => showFatal(e?.reason || e));
+      if (debugEnabled) {
+        document.getElementById("fatalReload")?.addEventListener("click", () => window.location.reload());
+        document.getElementById("fatalClose")?.addEventListener("click", () => { if (fatalEl) fatalEl.style.display = "none"; });
+      }
+
+      function animateBootProgress(totalMs = 2000) {
+        if (!bootBarEl) return { done: Promise.resolve(), setTo: () => {} };
+
+        let raf = 0;
+        let doneResolve;
+        const done = new Promise((r) => (doneResolve = r));
+        const start = performance.now();
+
+        const fastPhasePct = 85;
+        const fastPhaseMs = Math.round(totalMs * 0.35);
+        const slowPhaseMs = Math.max(1, totalMs - fastPhaseMs);
+
+        function setTo(p) {
+          const clamped = Math.max(0, Math.min(100, p));
+          bootBarEl.style.width = clamped.toFixed(2) + "%";
+        }
+
+        function tick(now) {
+          const t = now - start;
+          let pct;
+
+          if (t <= fastPhaseMs) {
+            pct = (t / fastPhaseMs) * fastPhasePct;
+          } else {
+            const tt = Math.min(1, (t - fastPhaseMs) / slowPhaseMs);
+            pct = fastPhasePct + tt * (100 - fastPhasePct);
+          }
+
+          setTo(pct);
+
+          if (t >= totalMs) {
+            cancelAnimationFrame(raf);
+            setTo(100);
+            doneResolve();
+            return;
+          }
+          raf = requestAnimationFrame(tick);
+        }
+
+        raf = requestAnimationFrame(tick);
+        return { done, setTo };
+      }
+
+      function hideBoot() {
+        if (!bootEl) return;
+        bootEl.classList.add("hidden");
+        window.setTimeout(() => {
+          if (bootEl && bootEl.parentNode) bootEl.parentNode.removeChild(bootEl);
+        }, 260);
+      }
+
+      window.storage = {
+        async get(key) {
+          const value = localStorage.getItem(key);
+          if (value == null) throw new Error("Not found");
+          return { value };
+        },
+        async set(key, value) {
+          localStorage.setItem(key, value);
+        },
+        async delete(key) {
+          localStorage.removeItem(key);
+        },
+      };
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = src;
+          s.async = true;
+          s.onload = () => resolve(src);
+          s.onerror = () => reject(new Error("Failed: " + src));
+          document.head.appendChild(s);
+        });
+      }
+
+      async function ensureRecharts() {
+        if (window.Recharts || window.recharts) return true;
+        const urls = [
+          "https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js",
+          "https://unpkg.com/recharts@2.12.7/umd/Recharts.js",
+          "https://cdn.jsdelivr.net/npm/recharts/umd/Recharts.min.js",
+        ];
+        for (const url of urls) {
+          try {
+            await loadScript(url);
+            if (window.Recharts || window.recharts) return true;
+          } catch (_e) {}
+        }
+        return false;
+      }
+
+      async function run() {
+        let fallbackHideTimer = 0;
+        try {
+          const progress = animateBootProgress(1000);
+          // Safety: never let the loader get stuck forever.
+          fallbackHideTimer = window.setTimeout(hideBoot, 15000);
+          await ensureRecharts();
+
+          // Inject + compile app exactly once to avoid double-execution
+          // (which causes "Identifier 'useState' has already been declared").
+          if (!window.__zt_app_booted) {
+            window.__zt_app_booted = true;
+            const s = document.createElement("script");
+            s.type = "text/babel";
+            s.setAttribute("data-presets", "react");
+            s.src = "./app_1.jsx";
+            document.body.appendChild(s);
+            Babel.transformScriptTags();
+          }
+
+          await progress.done;
+          hideBoot();
+        } catch (e) {
+          const proto = (window.location && window.location.protocol) || "";
+          const extra =
+            proto === "file:"
+              ? "<br><br><b>Fix:</b> open this app using a local web server (not directly from File Explorer).<br>Example: run <code>python -m http.server</code> in this folder, then open <code>http://localhost:8000</code>."
+              : "";
+          document.getElementById("root").innerHTML =
+            '<div style="padding:20px;color:#b91c1c">Failed to start app<br>' +
+            String(e.message || e) +
+            extra +
+            "</div>";
+          console.error(e);
+          showFatal(e);
+          hideBoot();
+        } finally {
+          if (fallbackHideTimer) window.clearTimeout(fallbackHideTimer);
+        }
+      }
+      run();
     </script>
   </body>
 </html>
-

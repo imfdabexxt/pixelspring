@@ -1,0 +1,3242 @@
+
+// ─── Root App with Auth Gate ───
+function App() {
+  const [user, setUser] = useState(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Check for saved session on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const session = await window.storage.get("current_session");
+        if (session) {
+          const parsed = JSON.parse(session.value);
+          setUser(parsed);
+        }
+      } catch (e) { /* no session */ }
+      setCheckingAuth(false);
+    })();
+  }, []);
+
+  const handleLogin = async (payload) => {
+    const userData = (payload && payload.user && payload.token) ? payload.user : payload;
+    if (!userData) return;
+    setUser({
+      ...userData,
+      role: userData?.role || "stock_manager",
+      avatarDataUrl: userData?.avatarDataUrl || "",
+    });
+    try {
+      await window.storage.set("current_session", JSON.stringify({
+        ...userData,
+        role: userData?.role || "stock_manager",
+        avatarDataUrl: userData?.avatarDataUrl || "",
+      }));
+    } catch (e) { /* storage might fail */ }
+  };
+
+  const handleUpdateUser = async (patch) => {
+    try {
+      setUser((prev) => {
+        const next = { ...(prev || {}), ...(patch || {}) };
+        window.storage.set("current_session", JSON.stringify(next)).catch(() => {});
+        if (next?.email) {
+          const userKey = `user:${String(next.email).trim().toLowerCase()}`;
+          window.storage.set(userKey, JSON.stringify(next)).catch(() => {});
+        }
+        return next;
+      });
+    } catch (_e) {
+      // ignore
+    }
+  };
+
+  const handleLogout = async () => {
+    setUser(null);
+    try {
+      await window.storage.delete("current_session");
+    } catch (e) { /* ok */ }
+  };
+
+  if (checkingAuth) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+        background: "linear-gradient(135deg, #1e1b4b, #312e81)", fontFamily: "'DM Sans', sans-serif",
+      }}>
+        <div style={{ textAlign: "center", color: "#a5b4fc", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <img src={LOGO_SRC} alt="ZuriTrack" style={{ width: 64, height: 64, objectFit: "contain", marginBottom: 10 }} />
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 0.5, marginBottom: 6 }}>ZuriTrack</div>
+          <div style={{ fontSize: 15 }}>{tLang("en", "common.loading")}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage onLogin={handleLogin} />;
+  }
+
+  return <MainApp user={user} onLogout={handleLogout} onUpdateUser={handleUpdateUser} />;
+}
+
+// ─── Main App ───
+function MainApp({ user, onLogout, onUpdateUser }) {
+  const [page, setPage] = useState("dashboard");
+  const [products, setProducts] = useState(SEED_PRODUCTS);
+  const [transactions, setTransactions] = useState(() => genTransactions());
+  const [toast, setToast] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [period, setPeriod] = useState("today");
+  const [lang, setLang] = useState("en");
+  const [currency, setCurrency] = useState("RWF");
+  const [theme, setTheme] = useState("light"); // "light" | "dark" | "system"
+  const [currencyOpen, setCurrencyOpen] = useState(false);
+  const [langOpen, setLangOpen] = useState(false);
+  const [uptimeSec, setUptimeSec] = useState(0);
+  const [uptimePoints, setUptimePoints] = useState([]); // [{ t: ms, v: sec }]
+  const [uptimeLogs, setUptimeLogs] = useState([]); // [{ t: ms, msg }]
+  const [lastDeleted, setLastDeleted] = useState(null);
+  const [saveStatus, setSaveStatus] = useState("saved"); // "saved" | "saving" | "failed"
+  const [hydrated, setHydrated] = useState(false);
+
+  const dataKey = `zuriTrack:data:${user?.email || "anonymous"}`;
+  const langKey = `zuriTrack:lang:${user?.email || "anonymous"}`;
+  const currencyKey = `zuriTrack:currency:${user?.email || "anonymous"}`;
+  const themeKey = `zuriTrack:theme:${user?.email || "anonymous"}`;
+  const tr = (key) => tLang(lang, key);
+  const trf = (key, vars) => tFmtLang(lang, key, vars);
+  const isPhone = () => {
+    try {
+      return window.matchMedia ? window.matchMedia("(max-width: 720px)").matches : (window.innerWidth <= 720);
+    } catch (_e) {
+      return false;
+    }
+  };
+
+  const currencyWrapRef = useRef(null);
+  const langWrapRef = useRef(null);
+  const profileImgInputRef = useRef(null);
+  const pickProfileImage = () => profileImgInputRef.current?.click?.();
+  const onProfileImageFile = (file) => {
+    if (!file) return;
+    if (!String(file.type || "").startsWith("image/")) { showToast("Please choose an image file.", "error"); return; }
+    const r = new FileReader();
+    r.onload = () => onUpdateUser?.({ avatarDataUrl: String(r.result || "") });
+    r.onerror = () => showToast("Could not read that image. Try another one.", "error");
+    r.readAsDataURL(file);
+  };
+  const CURRENCIES = [
+    ["RWF", "Rwandan Franc"],
+    ["USD", "US Dollar"],
+    ["KES", "Kenyan Shilling"],
+    ["TZS", "Tanzanian Shilling"],
+    ["UGX", "Ugandan Shilling"],
+    ["NGN", "Nigerian Naira"],
+    ["GHS", "Ghanaian Cedi"],
+    ["ZAR", "South African Rand"],
+    ["XOF", "West African CFA"],
+    ["XAF", "Central African CFA"],
+    ["ETB", "Ethiopian Birr"],
+    ["EGP", "Egyptian Pound"],
+    ["MAD", "Moroccan Dirham"],
+  ];
+  const currencyLabel = (code) => (CURRENCIES.find(([c]) => c === code)?.[1] || code);
+
+  useEffect(() => {
+    const onDocDown = (e) => {
+      if (currencyWrapRef.current && !currencyWrapRef.current.contains(e.target)) setCurrencyOpen(false);
+      if (langWrapRef.current && !langWrapRef.current.contains(e.target)) setLangOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("touchstart", onDocDown, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("touchstart", onDocDown);
+    };
+  }, []);
+
+  const LANG_OPTIONS = Object.entries(LANGS); // [code, label]
+
+  useEffect(() => {
+    // Mobile-first: start with drawer closed on small screens,
+    // and auto-close it when resizing down.
+    const mq = window.matchMedia ? window.matchMedia("(max-width: 720px)") : null;
+    const apply = () => {
+      const isSmall = mq ? mq.matches : (window.innerWidth <= 720);
+      if (isSmall) setSidebarOpen(false);
+    };
+    apply();
+    if (!mq) return;
+    const handler = () => apply();
+    if (mq.addEventListener) mq.addEventListener("change", handler);
+    else mq.addListener(handler);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", handler);
+      else mq.removeListener(handler);
+    };
+  }, []);
+
+  // Uptime tracking for the current session
+  useEffect(() => {
+    const startedAt = Date.now();
+    setUptimeLogs([{ t: startedAt, msg: "Session started" }]);
+    setUptimePoints([{ t: startedAt, v: 0 }]);
+
+    const tick = window.setInterval(() => {
+      const sec = Math.floor((Date.now() - startedAt) / 1000);
+      setUptimeSec(sec);
+    }, 1000);
+
+    const sample = window.setInterval(() => {
+      const now = Date.now();
+      const sec = Math.floor((now - startedAt) / 1000);
+      setUptimePoints((prev) => {
+        const next = [...prev, { t: now, v: sec }];
+        return next.length > 720 ? next.slice(next.length - 720) : next;
+      });
+    }, 10_000);
+
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(sample);
+    };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await window.storage.get(langKey);
+        const savedLang = saved?.value;
+        if (savedLang && LANGS[savedLang]) setLang(savedLang);
+      } catch (_e) {
+        // ignore
+      }
+    })();
+  }, [langKey]);
+
+  useEffect(() => {
+    // Persist language choice for this device/user
+    window.storage.set(langKey, lang).catch(() => {});
+  }, [langKey, lang]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await window.storage.get(themeKey);
+        const v = saved?.value;
+        if (v === "light" || v === "dark" || v === "system") setTheme(v);
+      } catch (_e) {}
+    })();
+  }, [themeKey]);
+
+  useEffect(() => {
+    window.storage.set(themeKey, theme).catch(() => {});
+  }, [themeKey, theme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+
+    const apply = () => {
+      const isSystemDark = mq ? mq.matches : false;
+      const resolved = theme === "system" ? (isSystemDark ? "dark" : "light") : theme;
+      root.setAttribute("data-theme", resolved);
+    };
+
+    apply();
+
+    if (!mq) return;
+    const handler = () => apply();
+    if (mq.addEventListener) mq.addEventListener("change", handler);
+    else mq.addListener(handler);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", handler);
+      else mq.removeListener(handler);
+    };
+  }, [theme]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await window.storage.get(currencyKey);
+        const savedCurrency = saved?.value;
+        if (savedCurrency) setCurrency(savedCurrency);
+      } catch (_e) {}
+    })();
+  }, [currencyKey]);
+
+  useEffect(() => {
+    // Keep global formatter currency in sync with selection
+    window.__zt_currency = currency || "RWF";
+    if (typeof window.__zt_fxRate !== "number") window.__zt_fxRate = 1;
+  }, [currency]);
+
+  useEffect(() => {
+    window.storage.set(currencyKey, currency).catch(() => {});
+  }, [currencyKey, currency]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await window.storage.get(dataKey);
+        if (saved?.value) {
+          const parsed = JSON.parse(saved.value);
+          if (Array.isArray(parsed.products) && Array.isArray(parsed.transactions)) {
+            setProducts(parsed.products.map(p => ({ ...p, unit: normalizeUnit(p.unit || "piece") })));
+            setTransactions(parsed.transactions.map(t => ({ ...t, unit: normalizeUnit(t.unit || "piece") })));
+          }
+        }
+      } catch (_e) {
+        // No saved data yet (or storage unavailable)
+      } finally {
+        setHydrated(true);
+      }
+    })();
+  }, [dataKey]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(async () => {
+      try {
+        await window.storage.set(dataKey, JSON.stringify({ products, transactions }));
+        setSaveStatus("saved");
+      } catch (_e) {
+        setSaveStatus("failed");
+      }
+    }, 450);
+    return () => clearTimeout(t);
+  }, [products, transactions, hydrated, dataKey]);
+
+  const saveNow = async () => {
+    setSaveStatus("saving");
+    try {
+      await window.storage.set(dataKey, JSON.stringify({ products, transactions }));
+      setSaveStatus("saved");
+    } catch (_e) {
+      setSaveStatus("failed");
+    }
+  };
+
+  const showToast = (message, type = "success") => setToast({ message, type, key: Date.now() });
+
+  const addTransaction = (txn) => {
+    setTransactions(prev => [txn, ...prev]);
+    setProducts(prev => prev.map(p => {
+      if (p.id === txn.productId) {
+        const qtyInProductUnit = txn.unit === p.unit ? txn.quantity : (convertQty(txn.quantity, txn.unit, p.unit) ?? txn.quantity);
+        const updated = {
+          ...p,
+          stock: txn.type === "in" ? p.stock + qtyInProductUnit : p.stock - qtyInProductUnit,
+          frequency: (p.frequency || 0) + 1,
+        };
+        // Auto-save cost price when adding stock, sale price when selling
+        if (txn.type === "in" && txn.costPrice > 0) {
+          updated.costPrice = txn.unit === p.unit ? txn.costPrice : (convertPricePerUnit(txn.costPrice, txn.unit, p.unit) ?? txn.costPrice);
+        }
+        if (txn.type === "out" && txn.salePrice > 0) {
+          updated.salePrice = txn.unit === p.unit ? txn.salePrice : (convertPricePerUnit(txn.salePrice, txn.unit, p.unit) ?? txn.salePrice);
+        }
+        return updated;
+      }
+      return p;
+    }));
+  };
+
+  const findOrCreateProduct = (name, unit, costPrice, salePrice) => {
+    const existing = products.find(p => normalize(p.name) === normalize(name));
+    if (existing) return existing;
+    const baseUnit = normalizeUnit(unit || "piece");
+    const newP = { id: uid(), name, unit: baseUnit, costPrice: costPrice || 0, salePrice: salePrice || 0, frequency: 0, stock: 0 };
+    setProducts(prev => [...prev, newP]);
+    return newP;
+  };
+
+  const updateProductPrice = (productId, newCostPrice, newSalePrice) => {
+    setProducts(prev => prev.map(p => {
+      if (p.id === productId) {
+        return {
+          ...p,
+          costPrice: newCostPrice !== null && newCostPrice !== undefined ? newCostPrice : p.costPrice,
+          salePrice: newSalePrice !== null && newSalePrice !== undefined ? newSalePrice : p.salePrice,
+        };
+      }
+      return p;
+    }));
+  };
+
+  const removeProduct = (productId) => {
+    const product = products.find(p => p.id === productId);
+    const deletedTxns = transactions.filter(t => t.productId === productId);
+    setLastDeleted(product ? { product, transactions: deletedTxns } : null);
+    setProducts(prev => prev.filter(p => p.id !== productId));
+    setTransactions(prev => prev.filter(t => t.productId !== productId));
+    if (product) showToast(trf("common.productRemovedUndo", { name: product.name }));
+  };
+
+  const undoRemoveProduct = () => {
+    if (!lastDeleted?.product) return;
+    setProducts(prev => [...prev, lastDeleted.product]);
+    setTransactions(prev => [...lastDeleted.transactions, ...prev]);
+    showToast(trf("common.productRestored", { name: lastDeleted.product.name }));
+    setLastDeleted(null);
+  };
+
+  const importAppData = (payload) => {
+    if (!payload || !Array.isArray(payload.products) || !Array.isArray(payload.transactions)) {
+      showToast(tr("reports.invalidBackupFile"), "error");
+      return;
+    }
+    setProducts(payload.products.map(p => ({ ...p, unit: normalizeUnit(p.unit || "piece") })));
+    setTransactions(payload.transactions.map(t => ({ ...t, unit: normalizeUnit(t.unit || "piece") })));
+    showToast(trf("reports.importedData", { products: payload.products.length, transactions: payload.transactions.length }));
+  };
+
+  const exportAppData = () => ({
+    app: "ZuriTrack",
+    exportedAt: new Date().toISOString(),
+    user: { email: user?.email || "", shopName: user?.shopName || "" },
+    products,
+    transactions,
+  });
+
+  const stats = useMemo(() => {
+    const filterByPeriod = (d) => {
+      if (period === "today") return isToday(d);
+      if (period === "weekly") return isThisWeek(d);
+      if (period === "monthly") return isThisMonth(d);
+      return isThisYear(d);
+    };
+    const filtered = transactions.filter(t => filterByPeriod(t.date));
+    const sales = filtered.filter(t => t.type === "out");
+    const purchases = filtered.filter(t => t.type === "in");
+    const totalSales = sales.reduce((s, t) => s + t.salePrice * t.quantity, 0);
+    const totalPurchases = purchases.reduce((s, t) => s + t.costPrice * t.quantity, 0);
+    const totalProfit = sales.reduce((s, t) => s + t.profit, 0);
+    const totalItems = sales.reduce((s, t) => s + t.quantity, 0);
+    return { totalSales, totalPurchases, totalProfit, totalItems, salesCount: sales.length, purchaseCount: purchases.length };
+  }, [transactions, period]);
+
+  const lowStockProducts = products.filter(p => p.stock < 30).sort((a, b) => a.stock - b.stock);
+  const topProducts = useMemo(() => {
+    const map = {};
+    transactions.filter(t => t.type === "out").forEach(t => {
+      map[t.productName] = (map[t.productName] || 0) + t.quantity;
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, qty]) => ({ name, qty }));
+  }, [transactions]);
+
+  const chartData = useMemo(() => {
+    const map = {};
+    const orderedKeys = [];
+
+    const addBucket = (key, label) => {
+      if (!map[key]) map[key] = { date: label, sales: 0, purchases: 0, profit: 0 };
+      return map[key];
+    };
+
+    const addTxToBucket = (bucketKey, t) => {
+      const b = map[bucketKey];
+      if (!b) return;
+      if (t.type === "out") {
+        b.sales += t.salePrice * t.quantity;
+        b.profit += t.profit;
+      } else {
+        b.purchases += t.costPrice * t.quantity;
+      }
+    };
+
+    if (period === "today") {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const buckets = 12; // every 2 hours
+      const stepMs = (24 / buckets) * 60 * 60 * 1000;
+      for (let i = 0; i < buckets; i++) {
+        const bucketStart = new Date(start.getTime() + i * stepMs);
+        const key = String(i);
+        const label = bucketStart.toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" });
+        addBucket(key, label);
+        orderedKeys.push(key);
+      }
+      transactions.forEach(t => {
+        const ts = t.timestamp || parseDate(t.date).getTime();
+        const dt = new Date(ts);
+        if (dt < start || dt >= new Date(start.getTime() + 24 * 60 * 60 * 1000)) return;
+        const idx = Math.floor((dt.getTime() - start.getTime()) / stepMs);
+        if (idx >= 0 && idx < buckets) addTxToBucket(String(idx), t);
+      });
+    } else if (period === "weekly") {
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const ds = d.toISOString().split("T")[0];
+        const label = d.toLocaleDateString("en", { weekday: "short" });
+        addBucket(ds, label);
+        orderedKeys.push(ds);
+      }
+      transactions.forEach(t => addTxToBucket(t.date, t));
+    } else if (period === "monthly") {
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const ds = d.toISOString().split("T")[0];
+        const label = d.toLocaleDateString("en", { month: "short", day: "numeric" });
+        addBucket(ds, label);
+        orderedKeys.push(ds);
+      }
+      transactions.forEach(t => addTxToBucket(t.date, t));
+    } else {
+      // yearly: current year months
+      const year = new Date().getFullYear();
+      for (let m = 0; m < 12; m++) {
+        const d = new Date(year, m, 1);
+        const key = `${year}-${m + 1}`;
+        const label = d.toLocaleDateString("en", { month: "short" });
+        addBucket(key, label);
+        orderedKeys.push(key);
+      }
+      transactions.forEach(t => {
+        const ts = t.timestamp || parseDate(t.date).getTime();
+        const d = new Date(ts);
+        if (d.getFullYear() !== year) return;
+        const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+        addTxToBucket(key, t);
+      });
+    }
+
+    return orderedKeys.map(k => map[k]);
+  }, [transactions, period]);
+
+  const COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#14b8a6"];
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Space+Mono:wght@400;700&display=swap');
+    :root {
+      --primary: #6366f1;
+      --primary-light: #818cf8;
+      --primary-dark: #4f46e5;
+      --primary-bg: #eef2ff;
+      --bg: #f8f9fc;
+      --bg-card: #ffffff;
+      --bg-sidebar: #1e1b4b;
+      --bg-hover: #f1f5f9;
+      --bg-tag: #e2e8f0;
+      --text: #000000;
+      --text-dim: #000000;
+      --text-ghost: #000000;
+      --text-sidebar: #c7d2fe;
+      --text-sidebar-active: #ffffff;
+      --border: #e2e8f0;
+      --border-light: #f1f5f9;
+      --green: #059669;
+      --green-bg: #ecfdf5;
+      --red: #dc2626;
+      --red-bg: #fef2f2;
+      --orange: #d97706;
+      --orange-bg: #fffbeb;
+      --blue: #2563eb;
+      --blue-bg: #eff6ff;
+      --low-bg: #fef2f2;
+      --low-fg: #dc2626;
+      --med-bg: #fffbeb;
+      --med-fg: #d97706;
+      --good-bg: #ecfdf5;
+      --good-fg: #059669;
+
+      /* Responsive layout vars */
+      --sidebar-w: 260px;
+      --header-pad-x: 32px;
+      --header-pad-y: 16px;
+      --content-pad-x: 32px;
+      --content-pad-y: 24px;
+
+      /* Chart + toast theme vars */
+      --chart-grid: rgba(148, 163, 184, 0.28);
+      --chart-axis: rgba(148, 163, 184, 0.38);
+      --chart-text: #94a3b8;
+      --chart-donut-hole: #ffffff;
+      --toast-success: #059669;
+      --toast-error: #dc2626;
+      --toast-info: #2563eb;
+      --popover-bg: rgba(255, 255, 255, 0.96);
+      --unit-icon-filter: grayscale(1) saturate(0) brightness(0);
+      --header-glass: linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.46));
+    }
+
+    /* Dark theme overrides */
+    [data-theme="dark"] {
+      --primary-bg: rgba(99, 102, 241, 0.14);
+      --bg: #0b1020;
+      --bg-card: rgba(255, 255, 255, 0.06);
+      --bg-sidebar: rgba(7, 11, 22, 0.78);
+      --bg-hover: rgba(255, 255, 255, 0.08);
+      --bg-tag: rgba(255, 255, 255, 0.10);
+      --text: rgba(255, 255, 255, 0.96);
+      --text-dim: rgba(255, 255, 255, 0.72);
+      --text-ghost: rgba(255, 255, 255, 0.55);
+      --text-sidebar: rgba(255, 255, 255, 0.78);
+      --text-sidebar-active: rgba(255, 255, 255, 0.98);
+      --border: rgba(255, 255, 255, 0.12);
+      --border-light: rgba(255, 255, 255, 0.08);
+      --green-bg: rgba(34, 197, 94, 0.14);
+      --red-bg: rgba(239, 68, 68, 0.14);
+      --orange-bg: rgba(245, 158, 11, 0.14);
+      --blue-bg: rgba(59, 130, 246, 0.14);
+      --low-bg: rgba(239, 68, 68, 0.14);
+      --low-fg: rgba(248, 113, 113, 0.95);
+      --med-bg: rgba(245, 158, 11, 0.14);
+      --med-fg: rgba(251, 191, 36, 0.95);
+      --good-bg: rgba(34, 197, 94, 0.14);
+      --good-fg: rgba(74, 222, 128, 0.95);
+      --chart-grid: rgba(255, 255, 255, 0.06);
+      --chart-axis: rgba(255, 255, 255, 0.08);
+      --chart-text: rgba(255, 255, 255, 0.55);
+      --chart-donut-hole: rgba(255, 255, 255, 0.08);
+      --popover-bg: rgba(10, 14, 28, 0.72);
+      --unit-icon-filter: grayscale(1) saturate(0) brightness(0) invert(1);
+      --header-glass: linear-gradient(180deg, rgba(7, 11, 22, 0.62), rgba(7, 11, 22, 0.44));
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
+    .unit-ic { filter: var(--unit-icon-filter); }
+    input, select, button, textarea { font-family: 'DM Sans', sans-serif; }
+    input, select, textarea, option {
+      color: var(--text) !important;
+      -webkit-text-fill-color: var(--text);
+    }
+    /* Placeholders: visibly lighter than typed text */
+    input::placeholder,
+    textarea::placeholder,
+    input::-webkit-input-placeholder,
+    textarea::-webkit-input-placeholder {
+      color: rgba(0, 0, 0, 0.40) !important;
+      -webkit-text-fill-color: rgba(0, 0, 0, 0.40) !important;
+      opacity: 1 !important;
+      font-weight: 500;
+    }
+    [data-theme="dark"] input::placeholder,
+    [data-theme="dark"] textarea::placeholder,
+    [data-theme="dark"] input::-webkit-input-placeholder,
+    [data-theme="dark"] textarea::-webkit-input-placeholder {
+      color: rgba(255, 255, 255, 0.40) !important;
+      -webkit-text-fill-color: rgba(255, 255, 255, 0.40) !important;
+    }
+    select { background: var(--bg-card); color: var(--text) !important; -webkit-text-fill-color: var(--text); }
+    option { background: var(--bg-card); color: var(--text) !important; }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    @keyframes chartRise {
+      from { opacity: 0; transform: translateY(14px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes chartDraw {
+      from { stroke-dashoffset: 100; opacity: 0.35; }
+      to { stroke-dashoffset: 0; opacity: 1; }
+    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .stat-card { transition: transform 0.2s, box-shadow 0.2s; }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+    .nav-item { transition: all 0.2s; cursor: pointer; border-radius: 12px; }
+    .nav-item:hover { background: rgba(255,255,255,0.08); }
+    .btn { cursor: pointer; border: none; font-weight: 600; border-radius: 12px; transition: all 0.2s; font-family: 'DM Sans', sans-serif; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-outline { background: transparent; border: 2px solid var(--border); color: var(--text); }
+    .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Glass panels */
+    .glass-panel {
+      position: relative;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.10);
+    }
+    [data-theme="dark"] .glass-panel {
+      box-shadow: 0 24px 70px rgba(0,0,0,0.35);
+    }
+    .glass-panel::before {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      background:
+        radial-gradient(600px 220px at 20% 0%, rgba(99,102,241,0.12), transparent 62%),
+        radial-gradient(560px 220px at 85% 10%, rgba(34,197,94,0.10), transparent 62%),
+        linear-gradient(120deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+      opacity: 0.65;
+      pointer-events: none;
+    }
+    [data-theme="dark"] .glass-panel::before {
+      background:
+        radial-gradient(600px 220px at 20% 0%, rgba(99,102,241,0.16), transparent 62%),
+        radial-gradient(560px 220px at 85% 10%, rgba(34,197,94,0.12), transparent 62%),
+        linear-gradient(120deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015));
+      opacity: 0.8;
+    }
+    .glass-panel::after {
+      content: none;
+    }
+    .glass-panel > * { position: relative; z-index: 1; }
+
+    /* Forms (Stock In / Stock Out) */
+    .page-centered {
+      width: 100%;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .card-pad {
+      padding: clamp(16px, 3.6vw, 32px);
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .grid-qty {
+      display: grid;
+      grid-template-columns: 1fr 180px;
+      gap: 12px;
+    }
+    @media (max-width: 720px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .grid-qty { grid-template-columns: 1fr; }
+    }
+
+    /* App-wide responsiveness */
+    .app-header { padding: var(--header-pad-y) var(--header-pad-x) !important; }
+    .app-content { padding: var(--content-pad-y) var(--content-pad-x) !important; }
+    .sidebar { width: var(--sidebar-w); }
+    .sidebar { backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); }
+    /* Stronger nav glass blur everywhere inside the sidebar */
+    .sidebar .nav-select,
+    .sidebar .glass-dd-btn,
+    .sidebar .glass-dd-list {
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+    }
+    .nav-section { padding: 10px 12px; margin-top: 6px; }
+    .nav-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.92);
+      margin: 10px 8px 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1;
+    }
+    .nav-label svg {
+      width: 14px;
+      height: 14px;
+      display: block;
+      transform: translateY(-0.5px);
+    }
+    .nav-select {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.26);
+      background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.10));
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      outline: none;
+      transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+      appearance: none;
+    }
+    .nav-select:hover {
+      background: linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.12));
+      border-color: rgba(255,255,255,0.38);
+      transform: translateY(-0.5px);
+    }
+    .nav-select:active { transform: translateY(0px); }
+    .nav-select:focus {
+      border-color: rgba(165, 180, 252, 0.95);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.28), 0 14px 34px rgba(0, 0, 0, 0.22);
+    }
+    .nav-select option {
+      background: #0b1020;
+      color: #ffffff;
+    }
+
+    /* Custom glass dropdown (consistent across browsers) */
+    .glass-dd { position: relative; width: 100%; }
+    .glass-dd-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.26);
+      background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.10));
+      color: #fff;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      outline: none;
+      transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+    }
+    .glass-dd-btn:hover {
+      background: linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.12));
+      border-color: rgba(255,255,255,0.38);
+      transform: translateY(-0.5px);
+    }
+    .glass-dd-btn:active { transform: translateY(0px); }
+    .glass-dd-btn:focus {
+      border-color: rgba(165, 180, 252, 0.95);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.28), 0 14px 34px rgba(0, 0, 0, 0.22);
+    }
+    .glass-dd-value { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .glass-dd-sub { font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .glass-dd-list {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 8px);
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(10, 14, 28, 0.72);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+      overflow: hidden;
+      z-index: 2000;
+    }
+    .glass-dd-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      color: rgba(255,255,255,0.94);
+      font-size: 13px;
+      font-weight: 800;
+      border: none;
+      background: transparent;
+      text-align: left;
+      transition: background 120ms ease;
+    }
+    .glass-dd-item:hover { background: rgba(255,255,255,0.10); }
+    .glass-dd-item small { color: rgba(255,255,255,0.72); font-weight: 800; font-size: 11px; }
+    .glass-dd-item.is-active { background: rgba(99, 102, 241, 0.22); }
+
+    /* Header language dropdown: same glass look */
+    .header-dd { width: 180px; }
+    .header-dd .glass-dd-btn {
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.45));
+      color: var(--text);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    [data-theme="dark"] .header-dd .glass-dd-btn {
+      background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.06));
+      color: rgba(255,255,255,0.92);
+      border-color: rgba(255,255,255,0.14);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+    }
+
+    /* Inventory unit dropdown: compact, matches app theme */
+    .inv-dd { width: auto; min-width: 120px; }
+    .inv-dd .glass-dd-btn {
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 800;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.46));
+      color: var(--text);
+      box-shadow: 0 12px 26px rgba(2, 6, 23, 0.10);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    [data-theme="dark"] .inv-dd .glass-dd-btn {
+      background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.06));
+      color: rgba(255,255,255,0.92);
+      border-color: rgba(255,255,255,0.14);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+    }
+    .inv-dd .glass-dd-sub { color: rgba(15,23,42,0.60); font-weight: 800; }
+    [data-theme="dark"] .inv-dd .glass-dd-sub { color: rgba(255,255,255,0.62); }
+    .inv-dd .glass-dd-list {
+      top: calc(100% + 8px);
+      min-width: 180px;
+      right: auto;
+      left: 0;
+      background: rgba(255,255,255,0.86);
+      border: 1px solid rgba(148,163,184,0.35);
+      box-shadow: 0 22px 60px rgba(2, 6, 23, 0.18);
+    }
+    [data-theme="dark"] .inv-dd .glass-dd-list {
+      background: rgba(10, 14, 28, 0.78);
+      border-color: rgba(255,255,255,0.14);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+    }
+    .inv-dd .glass-dd-item { color: rgba(15,23,42,0.92); }
+    [data-theme="dark"] .inv-dd .glass-dd-item { color: rgba(255,255,255,0.94); }
+    .inv-dd .glass-dd-item:hover { background: rgba(99,102,241,0.10); }
+    [data-theme="dark"] .inv-dd .glass-dd-item:hover { background: rgba(255,255,255,0.10); }
+
+    @media (max-width: 1024px) {
+      :root {
+        --header-pad-x: 20px;
+        --content-pad-x: 20px;
+      }
+      .dash-charts { grid-template-columns: 1fr !important; }
+      .dash-bottom { grid-template-columns: 1fr !important; }
+    }
+
+    @media (max-width: 720px) {
+      :root {
+        --header-pad-x: 14px;
+        --header-pad-y: 12px;
+        --content-pad-x: 14px;
+        --content-pad-y: 16px;
+      }
+      .app-header { flex-wrap: wrap; }
+      .hide-sm { display: none !important; }
+      .page-centered { max-width: 100%; }
+      .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .app-content { max-width: 100vw; overflow-x: hidden; }
+      img, svg, canvas { max-width: 100%; height: auto; }
+      table { width: 100%; }
+      /* Any wide content becomes scrollable instead of overflowing */
+      .app-content > div { max-width: 100%; }
+      .app-content * { min-width: 0; }
+    .recent-card { padding: 16px !important; }
+    .recent-table th { padding: 8px 10px !important; font-size: 11px !important; }
+    .recent-table td { padding: 10px 10px !important; font-size: 13px !important; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      line-height: 1;
+    }
+    .mono { font-family: 'Space Mono', monospace; }
+
+      /* Mobile drawer sidebar */
+      .sidebar {
+        position: fixed !important;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: min(var(--sidebar-w), 86vw) !important;
+        transform: translateX(-102%);
+        transition: transform 180ms ease, box-shadow 180ms ease;
+        box-shadow: none;
+        z-index: 120;
+      }
+      .sidebar.is-open {
+        transform: translateX(0);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      .sidebar.is-open .nav-item {
+        animation: navIn 160ms ease both;
+      }
+      .sidebar.is-open .nav-item:nth-child(1) { animation-delay: 10ms; }
+      .sidebar.is-open .nav-item:nth-child(2) { animation-delay: 25ms; }
+      .sidebar.is-open .nav-item:nth-child(3) { animation-delay: 40ms; }
+      .sidebar.is-open .nav-item:nth-child(4) { animation-delay: 55ms; }
+      .sidebar.is-open .nav-item:nth-child(5) { animation-delay: 70ms; }
+      @keyframes navIn {
+        from { opacity: 0; transform: translateX(-8px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      .backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.5);
+        z-index: 110;
+      }
+      .main {
+        margin-left: 0 !important;
+      }
+    }
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
+        {sidebarOpen && <div className="backdrop" onClick={() => setSidebarOpen(false)} />}
+        {/* Sidebar */}
+        <aside
+          className={`sidebar ${sidebarOpen ? "is-open" : ""}`}
+          style={{
+            width: sidebarOpen ? "var(--sidebar-w)" : 0,
+            overflow: "hidden",
+            transition: "width 0.3s",
+            background: "var(--bg-sidebar)",
+            display: "flex",
+            flexDirection: "column",
+            position: "fixed",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            zIndex: 120,
+          }}
+        >
+          <div style={{ padding: "24px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{
+                width: 38, height: 38,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <img src={LOGO_SRC} alt="ZuriTrack" style={{ width: 24, height: 24, objectFit: "contain" }} />
+              </div>
+              <div>
+                <div style={{ color: "#fff", fontWeight: 700, fontSize: 17, letterSpacing: -0.5 }}>ZuriTrack</div>
+                <div style={{ color: "var(--text-sidebar)", fontSize: 11 }}>{tr("common.inventoryManager")}</div>
+              </div>
+            </div>
+          </div>
+          <nav style={{ padding: "16px 12px", flex: 1 }}>
+            {[
+              { id: "dashboard", icon: Icons.dashboard, labelKey: "nav.dashboard" },
+              { id: "stockIn", icon: Icons.stockIn, labelKey: "nav.stockIn" },
+              { id: "stockOut", icon: Icons.stockOut, labelKey: "nav.stockOut" },
+              { id: "inventory", icon: Icons.inventory, labelKey: "nav.inventory" },
+              { id: "reports", icon: Icons.reports, labelKey: "nav.reports" },
+              { id: "uptime", icon: Icons.uptime, labelKey: "nav.uptime" },
+            ].map(item => (
+              <div
+                key={item.id}
+                className="nav-item"
+                onClick={() => { setPage(item.id); if (isPhone()) setSidebarOpen(false); }}
+                style={{
+                  padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
+                  marginBottom: 4, color: page === item.id ? "var(--text-sidebar-active)" : "var(--text-sidebar)",
+                  background: page === item.id ? "rgba(255,255,255,0.12)" : "transparent",
+                  fontWeight: page === item.id ? 600 : 400, fontSize: 14,
+                }}
+              >
+                {item.icon}
+                {tr(item.labelKey)}
+                {item.id === "inventory" && lowStockProducts.length > 0 && (
+                  <span style={{
+                    marginLeft: "auto", background: "#ef4444", color: "#fff", fontSize: 11,
+                    padding: "2px 8px", borderRadius: 20, fontWeight: 700,
+                  }}>{lowStockProducts.length}</span>
+                )}
+              </div>
+            ))}
+
+            {/* Currency (under Reports) */}
+            <div className="nav-section">
+              <div className="nav-label">
+                <span style={{ display: "inline-flex", opacity: 0.95 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 7h18v10H3V7Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+                    <path d="M6 10h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                    <path d="M6 14h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                    <path d="M16 10h2M16 14h2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </span>
+                Currency
+              </div>
+              <div className="glass-dd" ref={currencyWrapRef}>
+                <button
+                  type="button"
+                  className="glass-dd-btn"
+                  onClick={() => setCurrencyOpen(v => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={currencyOpen ? "true" : "false"}
+                >
+                  <span className="glass-dd-value">
+                    <span>{currency}</span>
+                    <span className="glass-dd-sub">{currencyLabel(currency)}</span>
+                  </span>
+                  <span aria-hidden="true" style={{ opacity: 0.9, display: "inline-flex" }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+
+                {currencyOpen && (
+                  <div className="glass-dd-list" role="listbox" aria-label="Currency options">
+                    {CURRENCIES.map(([code, label]) => (
+                      <button
+                        type="button"
+                        key={code}
+                        className={`glass-dd-item ${currency === code ? "is-active" : ""}`}
+                        onClick={() => { setCurrency(code); setCurrencyOpen(false); }}
+                      >
+                        <span>{label}</span>
+                        <small>{code}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Theme */}
+            <div className="nav-section">
+              <div className="nav-label">Theme</div>
+              <div style={{ display: "flex", gap: 6, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 14, padding: 4 }}>
+                {[
+                  ["light", "Light"],
+                  ["dark", "Dark"],
+                  ["system", "System"],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className="btn"
+                    onClick={() => setTheme(id)}
+                    style={{
+                      flex: 1,
+                      padding: "9px 10px",
+                      fontSize: 12,
+                      fontWeight: 800,
+                      borderRadius: 12,
+                      background: theme === id ? "rgba(255,255,255,0.16)" : "transparent",
+                      border: theme === id ? "1px solid rgba(255,255,255,0.22)" : "1px solid transparent",
+                      color: "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </nav>
+          <div style={{ padding: "16px 20px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <button
+                type="button"
+                onClick={pickProfileImage}
+                title="Change profile image"
+                style={{
+                  width: 36, height: 36, borderRadius: "50%",
+                  background: "linear-gradient(135deg, #c084fc, #818cf8)",
+                  display: "grid", placeItems: "center",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  overflow: "hidden",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                {user?.avatarDataUrl ? (
+                  <img src={user.avatarDataUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>
+                    {(user?.shopName || user?.email || "U").charAt(0).toUpperCase()}
+                  </span>
+                )}
+              </button>
+              <input
+                ref={profileImgInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => onProfileImageFile(e.target.files?.[0])}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "#fff", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user?.shopName || tr("common.myShop")}
+                </div>
+                <div style={{ color: "var(--text-sidebar)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user?.email || tr("common.admin")} • {(user?.role === "admin") ? "Admin" : "Stock Manager"}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => onUpdateUser?.({ role: "stock_manager" })}
+                style={{
+                  flex: 1,
+                  padding: "8px 10px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: user?.role !== "admin" ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
+                  color: "#fff",
+                  fontWeight: 800,
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Stock Manager
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => onUpdateUser?.({ role: "admin" })}
+                style={{
+                  flex: 1,
+                  padding: "8px 10px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: user?.role === "admin" ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
+                  color: "#fff",
+                  fontWeight: 800,
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Admin
+              </button>
+            </div>
+            <button onClick={onLogout} className="nav-item" style={{
+              width: "100%", padding: "9px 14px", display: "flex", alignItems: "center", gap: 8,
+              background: "rgba(239,68,68,0.1)", border: "none", color: "#fca5a5",
+              fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              {tr("common.logout")}
+            </button>
+            <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 10, color: "var(--text-sidebar)" }}>
+              <span>Powered by</span>
+              <img src={POWERED_BY_LOGO_SRC} alt="PixelSpring" style={{ width: 14, height: 14, objectFit: "contain" }} />
+              <span style={{ color: "#fff", fontWeight: 700 }}>PixelSpring</span>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main */}
+        <main className="main" style={{ flex: 1, marginLeft: sidebarOpen ? "var(--sidebar-w)" : 0, transition: "margin-left 0.3s" }}>
+          {/* Header */}
+          <header style={{
+            padding: "16px 32px",
+            background: "var(--header-glass, linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.46)))",
+            borderBottom: "1px solid var(--border)",
+            display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0, zIndex: 50,
+            backdropFilter: "blur(25px)",
+            WebkitBackdropFilter: "blur(25px)",
+          }} className="app-header">
+            <button className="btn" onClick={() => setSidebarOpen(!sidebarOpen)} style={{ padding: 8, background: "transparent", color: "var(--text)" }}>
+              {Icons.menu}
+            </button>
+            <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.5 }}>
+              {page === "dashboard"
+                ? tr("nav.dashboard")
+                : page === "uptime"
+                  ? tr("nav.uptime")
+                : page === "stockIn"
+                ? tr("nav.stockIn")
+                : page === "stockOut"
+                  ? tr("nav.stockOut")
+                  : page === "inventory"
+                    ? tr("nav.inventory")
+                    : tr("nav.reports")}
+            </h1>
+            <div style={{ flex: 1 }} />
+            <div className="hide-sm" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-dim)" }}>
+              {new Date().toLocaleDateString(localeForLang(lang), { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 4px" }} title={tr("common.language")}>
+              <span style={{ color: "var(--text-dim)", display: "inline-flex", alignItems: "center" }}>{Icons.globe}</span>
+              <div className="glass-dd header-dd" ref={langWrapRef}>
+                <button
+                  type="button"
+                  className="glass-dd-btn"
+                  onClick={() => setLangOpen(v => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={langOpen ? "true" : "false"}
+                  style={{ padding: "9px 12px", borderRadius: 12, fontSize: 12 }}
+                >
+                  <span className="glass-dd-value">
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 800 }}>{lang.toUpperCase()}</span>
+                    <span className="glass-dd-sub" style={{ color: "inherit", opacity: 0.75 }}>{LANGS[lang]}</span>
+                  </span>
+                  <span aria-hidden="true" style={{ opacity: 0.8, display: "inline-flex" }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+
+                {langOpen && (
+                  <div className="glass-dd-list" role="listbox" aria-label="Language options" style={{ top: "calc(100% + 10px)" }}>
+                    {LANG_OPTIONS.map(([code, label]) => (
+                      <button
+                        type="button"
+                        key={code}
+                        className={`glass-dd-item ${lang === code ? "is-active" : ""}`}
+                        onClick={() => { setLang(code); setLangOpen(false); }}
+                      >
+                        <span>{label}</span>
+                        <small>{code.toUpperCase()}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={saveNow}
+              disabled={saveStatus === "saving"}
+              className="btn"
+              style={{
+                padding: "9px 12px",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border)",
+                color: "var(--text-dim)",
+                borderRadius: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                cursor: saveStatus === "saving" ? "wait" : "pointer",
+                fontSize: 12,
+                fontWeight: 700,
+                opacity: saveStatus === "saving" ? 0.7 : 1,
+              }}
+              title={tr("common.saveTitle")}
+            >
+              {Icons.save} {saveStatus === "saving" ? tr("common.saving") : tr("common.save")}
+            </button>
+            <div style={{ position: "relative" }}>
+              <div style={{ cursor: "pointer", color: "var(--text-dim)" }}>{Icons.bell}</div>
+              {lowStockProducts.length > 0 && <div style={{ position: "absolute", top: -2, right: -2, width: 8, height: 8, borderRadius: "50%", background: "#ef4444" }} />}
+            </div>
+          </header>
+
+          <div style={{ padding: "24px 32px", animation: "fadeIn 0.3s ease" }} className="app-content">
+            {page === "dashboard" && <DashboardPage stats={stats} period={period} setPeriod={setPeriod} chartData={chartData} topProducts={topProducts} lowStockProducts={lowStockProducts} products={products} transactions={transactions} COLORS={COLORS} t={tr} currency={currency} />}
+            {page === "uptime" && <UptimePage uptimeSec={uptimeSec} points={uptimePoints} logs={uptimeLogs} />}
+            {page === "stockIn" && <StockInPage products={products} addTransaction={addTransaction} findOrCreateProduct={findOrCreateProduct} updateProductPrice={updateProductPrice} showToast={showToast} t={tr} tf={trf} lang={lang} currency={currency} />}
+            {page === "stockOut" && <StockOutPage products={products} addTransaction={addTransaction} updateProductPrice={updateProductPrice} showToast={showToast} t={tr} tf={trf} lang={lang} currency={currency} />}
+            {page === "inventory" && <InventoryPage products={products} updateProductPrice={updateProductPrice} removeProduct={removeProduct} undoRemoveProduct={undoRemoveProduct} hasUndo={!!lastDeleted} showToast={showToast} t={tr} />}
+            {page === "reports" && <ReportsPage transactions={transactions} products={products} onImportData={importAppData} onExportData={exportAppData} showToast={showToast} t={tr} lang={lang} />}
+          </div>
+        </main>
+
+        {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+      </div>
+    </>
+  );
+}
+
+// ─── DASHBOARD ───
+function DashboardPage({ stats, period, setPeriod, chartData, topProducts, lowStockProducts, products, transactions, COLORS, t, currency }) {
+  const periodButtons = ["today", "weekly", "monthly", "yearly"];
+  const recentTxns = transactions.slice(0, 8);
+  const tt = t || ((k) => k);
+  const unitByName = useMemo(() => {
+    const m = {};
+    (products || []).forEach((p) => { if (p && p.name) m[p.name] = p.unit; });
+    return m;
+  }, [products]);
+  const [showCharts, setShowCharts] = useState(true);
+  const [isSmall, setIsSmall] = useState(false);
+  const stockDistribution = products
+    .filter(p => p.stock > 0)
+    .slice(0, 8)
+    .map((p, i) => ({ name: p.name, value: p.stock, color: COLORS[i % COLORS.length] }));
+  const totalStock = stockDistribution.reduce((sum, p) => sum + p.value, 0);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setShowCharts(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia ? window.matchMedia("(max-width: 720px)") : null;
+    const apply = () => setIsSmall(mq ? mq.matches : (window.innerWidth <= 720));
+    apply();
+    if (!mq) return;
+    const handler = () => apply();
+    if (mq.addEventListener) mq.addEventListener("change", handler);
+    else mq.addListener(handler);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", handler);
+      else mq.removeListener(handler);
+    };
+  }, []);
+
+  return (
+    <div>
+      {/* Welcome banner when empty */}
+      {products.length === 0 && transactions.length === 0 && (
+        <div style={{
+          background: "linear-gradient(135deg, #eef2ff, #e0e7ff)", borderRadius: 20, padding: "36px 32px",
+          marginBottom: 28, border: "1px solid #c7d2fe",
+        }}>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "#1e1b4b", marginBottom: 8 }}>
+            {tt("common.noDataDash.title")} 🎉
+          </div>
+          <div style={{ fontSize: 15, color: "#4338ca", lineHeight: 1.6, maxWidth: 560 }}>
+            {tt("common.noDataDash.body1")} <strong>{tt("nav.stockIn")}</strong> {tt("common.noDataDash.body2")}
+            {" "}
+            {tt("common.noDataDash.body3")}
+          </div>
+        </div>
+      )}
+
+      {/* Period selector */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 24 }}>
+        {periodButtons.map(p => (
+          <button key={p} className="btn" onClick={() => setPeriod(p)} style={{
+            padding: "8px 20px", fontSize: 13, textTransform: "capitalize",
+            background: period === p ? "var(--primary)" : "var(--bg-card)",
+            color: period === p ? "#fff" : "var(--text-dim)", border: period === p ? "none" : "1px solid var(--border)",
+          }}>{tt(`period.${p}`)}</button>
+        ))}
+      </div>
+
+      {isSmall && (
+        <>
+          {/* Charts Row (phone first) */}
+          <div className="dash-charts" style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, marginBottom: 28 }}>
+            <div className="glass-panel" style={{ padding: 24, overflow: "visible", animation: showCharts ? "chartRise 0.9s ease-out" : "none" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>{tt("dashboard.salesPurchases")}</div>
+              <SimpleTwoLineChart data={chartData} />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div className="glass-panel" style={{ padding: 24, flex: 1, animation: showCharts ? "chartRise 0.9s ease-out" : "none" }}>
+                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{tt("dashboard.stockDistribution")}</div>
+                <SimpleDonutChart data={stockDistribution} />
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: -4, marginBottom: 8 }}>
+                  {tt("common.totalInStock")}: <strong style={{ color: "var(--text)" }}>{fmt(totalStock)}</strong>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+                  {stockDistribution.length === 0 ? (
+                    <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{tt("common.noStockYet")}</span>
+                  ) : stockDistribution.map((s, i) => (
+                    <span key={i} style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block" }} />
+                      {s.name} ({fmt(s.value)})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Stat Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20, marginBottom: 28 }}>
+            {[
+              { label: tt("dashboard.totalSales"), value: fmtCur(stats.totalSales, currency), icon: Icons.trend, color: "#6366f1", bg: "var(--primary-bg)", sub: `${stats.salesCount} ${tt("common.orders")}` },
+              { label: tt("dashboard.totalPurchases"), value: fmtCur(stats.totalPurchases, currency), icon: Icons.stockIn, color: "#059669", bg: "var(--green-bg)", sub: `${stats.purchaseCount} ${tt("common.entries")}` },
+              { label: tt("dashboard.netProfit"), value: fmtCur(stats.totalProfit, currency), icon: Icons.trend, color: stats.totalProfit >= 0 ? "#059669" : "#dc2626", bg: stats.totalProfit >= 0 ? "var(--green-bg)" : "var(--red-bg)", sub: `${((stats.totalProfit / (stats.totalSales || 1)) * 100).toFixed(1)}% ${tt("common.margin")}` },
+              { label: tt("dashboard.itemsSold"), value: fmt(stats.totalItems), icon: Icons.inventory, color: "#d97706", bg: "var(--orange-bg)", sub: tt("common.unitsTotal") },
+            ].map((card, i) => (
+              <div key={i} className="stat-card" style={{
+                background: "var(--bg-card)", borderRadius: 16, padding: "22px 24px",
+                border: "1px solid var(--border)", position: "relative", overflow: "hidden",
+              }}>
+                <div style={{ position: "absolute", top: 16, right: 16, width: 42, height: 42, borderRadius: 12, background: card.bg, display: "flex", alignItems: "center", justifyContent: "center", color: card.color }}>
+                  {card.icon}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 8, fontWeight: 500 }}>{card.label}</div>
+                <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: -1, color: card.color, fontFamily: "'Space Mono', monospace" }}>{card.value}</div>
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 6 }}>{card.sub}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {!isSmall && (
+        <>
+          {/* Stat Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20, marginBottom: 28 }}>
+            {[
+              { label: tt("dashboard.totalSales"), value: fmtCur(stats.totalSales, currency), icon: Icons.trend, color: "#6366f1", bg: "var(--primary-bg)", sub: `${stats.salesCount} ${tt("common.orders")}` },
+              { label: tt("dashboard.totalPurchases"), value: fmtCur(stats.totalPurchases, currency), icon: Icons.stockIn, color: "#059669", bg: "var(--green-bg)", sub: `${stats.purchaseCount} ${tt("common.entries")}` },
+              { label: tt("dashboard.netProfit"), value: fmtCur(stats.totalProfit, currency), icon: Icons.trend, color: stats.totalProfit >= 0 ? "#059669" : "#dc2626", bg: stats.totalProfit >= 0 ? "var(--green-bg)" : "var(--red-bg)", sub: `${((stats.totalProfit / (stats.totalSales || 1)) * 100).toFixed(1)}% ${tt("common.margin")}` },
+              { label: tt("dashboard.itemsSold"), value: fmt(stats.totalItems), icon: Icons.inventory, color: "#d97706", bg: "var(--orange-bg)", sub: tt("common.unitsTotal") },
+            ].map((card, i) => (
+              <div key={i} className="stat-card" style={{
+                background: "var(--bg-card)", borderRadius: 16, padding: "22px 24px",
+                border: "1px solid var(--border)", position: "relative", overflow: "hidden",
+              }}>
+                <div style={{ position: "absolute", top: 16, right: 16, width: 42, height: 42, borderRadius: 12, background: card.bg, display: "flex", alignItems: "center", justifyContent: "center", color: card.color }}>
+                  {card.icon}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 8, fontWeight: 500 }}>{card.label}</div>
+                <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: -1, color: card.color, fontFamily: "'Space Mono', monospace" }}>{card.value}</div>
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 6 }}>{card.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Charts Row */}
+          <div className="dash-charts" style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, marginBottom: 28 }}>
+            <div className="glass-panel" style={{ padding: 24, overflow: "visible", animation: showCharts ? "chartRise 0.9s ease-out" : "none" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>{tt("dashboard.salesPurchases")}</div>
+              <SimpleTwoLineChart data={chartData} />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div className="glass-panel" style={{ padding: 24, flex: 1, animation: showCharts ? "chartRise 0.9s ease-out" : "none" }}>
+                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{tt("dashboard.stockDistribution")}</div>
+                <SimpleDonutChart data={stockDistribution} />
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: -4, marginBottom: 8 }}>
+                  {tt("common.totalInStock")}: <strong style={{ color: "var(--text)" }}>{fmt(totalStock)}</strong>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+                  {stockDistribution.length === 0 ? (
+                    <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{tt("common.noStockYet")}</span>
+                  ) : stockDistribution.map((s, i) => (
+                    <span key={i} style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block" }} />
+                      {s.name} ({fmt(s.value)})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Bottom Row */}
+      <div className="dash-bottom" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        {/* Top Selling */}
+        <div style={{ background: "var(--bg-card)", borderRadius: 16, padding: 24, border: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{tt("dashboard.topSellingProducts")}</div>
+          {topProducts.map((p, i) => {
+            const maxQ = topProducts[0]?.qty || 1;
+            return (
+              <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <span style={{
+                  width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, fontWeight: 700, background: i < 3 ? COLORS[i] : "var(--bg)", color: i < 3 ? "#fff" : "var(--text-dim)",
+                }}>{i + 1}</span>
+                <span style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", opacity: 0.9 }}><UnitIcon unit={unitByName[p.name] || "piece"} size={16} /></span>
+                    <span>{p.name}</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: "var(--bg)", marginTop: 4, overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 3, background: COLORS[i % COLORS.length], width: `${(p.qty / maxQ) * 100}%`, transition: "width 0.8s ease" }} />
+                  </div>
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-dim)", fontFamily: "'Space Mono', monospace" }}>{p.qty}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Low Stock Alerts */}
+        <div style={{ background: "var(--bg-card)", borderRadius: 16, padding: 24, border: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 16, fontWeight: 700, marginBottom: 16 }}>
+              <span style={{ color: "#ef4444" }}>{Icons.alert}</span> {tt("dashboard.lowStockAlerts")}
+            </div>
+          {lowStockProducts.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 32, color: "var(--text-dim)" }}>{tt("dashboard.allWellStocked")}</div>
+          ) : lowStockProducts.slice(0, 6).map(p => (
+            <div key={p.id} style={{
+              display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "10px 14px",
+              borderRadius: 10, background: p.stock < 15 ? "var(--low-bg)" : "var(--med-bg)",
+            }}>
+              <div style={{
+                width: 10, height: 10, borderRadius: "50%",
+                background: p.stock < 15 ? "var(--low-fg)" : "var(--med-fg)",
+                animation: p.stock < 10 ? "pulse 2s infinite" : "none",
+              }} />
+              <span style={{ flex: 1, fontWeight: 500, fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span style={{ display: "inline-flex", opacity: 0.9 }}><UnitIcon unit={p.unit} size={16} /></span>
+                <span>{p.name}</span>
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: p.stock < 15 ? "var(--low-fg)" : "var(--med-fg)", fontFamily: "'Space Mono', monospace" }}>
+                {p.stock} {p.unit}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent Transactions */}
+      <div className="recent-card" style={{ background: "var(--bg-card)", borderRadius: 16, padding: 24, border: "1px solid var(--border)", marginTop: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{tt("dashboard.recentTransactions")}</div>
+        {recentTxns.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--text-dim)" }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+            <div style={{ fontSize: 14 }}>No transactions yet. Add stock or sell products to see them here.</div>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="recent-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "2px solid var(--border)" }}>
+                {["Product", "Type", "Qty", "Price/unit", "Total", "Profit", "Date"].map(h => (
+                  <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recentTxns.map(t => {
+                const perUnit = t.type === "in" ? t.costPrice : t.salePrice;
+                const total = perUnit * t.quantity;
+                return (
+                  <tr key={t.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                    <td style={{ padding: "12px", fontSize: 14, fontWeight: 500 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ display: "inline-flex", opacity: 0.9 }}><UnitIcon unit={t.unit} size={16} /></span>
+                        <span>{t.productName}</span>
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px" }}>
+                      <span
+                        className="chip"
+                        style={{
+                          background: t.type === "in" ? "var(--green-bg)" : "var(--blue-bg)",
+                          color: t.type === "in" ? "var(--green)" : "var(--blue)",
+                        }}
+                      >
+                        {t.type === "in" ? Icons.stockIn : Icons.stockOut}
+                        {t.type === "in" ? "Stock In" : "Sale"}
+                      </span>
+                    </td>
+                    <td className="mono" style={{ padding: "12px", fontSize: 14, fontFamily: "'Space Mono', monospace" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ display: "inline-flex", opacity: 0.85 }}><UnitIcon unit={t.unit} size={14} /></span>
+                        <span>{t.quantity} {t.unit}</span>
+                      </span>
+                    </td>
+                    <td className="mono" style={{ padding: "12px", fontSize: 13, fontFamily: "'Space Mono', monospace" }}>
+                      {fmtCur(perUnit)}<span style={{ fontSize: 11, color: "var(--text-dim)" }}>/{t.unit}</span>
+                    </td>
+                    <td className="mono" style={{ padding: "12px", fontSize: 14, fontWeight: 600, fontFamily: "'Space Mono', monospace" }}>
+                      {fmtCur(total)}
+                    </td>
+                    <td className="mono" style={{ padding: "12px", fontSize: 14, fontWeight: 600, fontFamily: "'Space Mono', monospace", color: t.profit > 0 ? "var(--green)" : "var(--text-dim)" }}>
+                      {t.type === "out" ? fmtCur(t.profit) : "—"}
+                    </td>
+                    <td style={{ padding: "12px", fontSize: 13, color: "var(--text-dim)" }}>{t.date}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UptimePage({ uptimeSec, points, logs }) {
+  const fmtDur = (sec) => {
+    const s = Math.max(0, Math.floor(sec || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const ss = s % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  };
+
+  const data = (points || []).slice(-120); // last ~20min at 10s sampling
+  // Show fewer bars for a cleaner modern look
+  const BAR_COUNT = 36;
+  const stride = Math.max(1, Math.floor(data.length / BAR_COUNT));
+  const bars = data.filter((_, i) => i % stride === 0).slice(-BAR_COUNT);
+  const maxV = Math.max(1, ...bars.map(d => Number(d.v || 0)));
+  const width = 900;
+  const height = 240;
+  const pad = { top: 18, right: 16, bottom: 28, left: 52 };
+  const chartW = width - pad.left - pad.right;
+  const chartH = height - pad.top - pad.bottom;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 14, background: "var(--primary-bg)", display: "grid", placeItems: "center", color: "var(--primary)" }}>
+          {Icons.uptime}
+        </div>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.4 }}>System Uptime</div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Tracks how long this session has been running.</div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ padding: "10px 12px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--bg-card)", fontFamily: "'Space Mono', monospace", fontWeight: 800, backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)" }}>
+          {fmtDur(uptimeSec)}
+        </div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: 18, marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)" }}>Uptime (bar graph)</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Last ~20 minutes • sampled</div>
+        </div>
+        <div style={{ width: "100%", aspectRatio: `${width} / ${height}`, minHeight: 220 }}>
+          <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
+            <defs>
+              <linearGradient id="upBar" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#6366f1" stopOpacity="0.95" />
+                <stop offset="100%" stopColor="#22c55e" stopOpacity="0.40" />
+              </linearGradient>
+              <linearGradient id="upGlow" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#6366f1" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+              </linearGradient>
+              <filter id="barGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="4" result="b" />
+                <feColorMatrix in="b" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.55 0" result="g" />
+                <feMerge>
+                  <feMergeNode in="g" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            {/* grid */}
+            {[...Array(5)].map((_, i) => {
+              const y = pad.top + (i / 4) * chartH;
+              return <line key={i} x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="var(--chart-grid)" strokeWidth="1" />;
+            })}
+            <line x1={pad.left} y1={pad.top + chartH} x2={width - pad.right} y2={pad.top + chartH} stroke="var(--chart-axis)" />
+            <line x1={pad.left} y1={pad.top} x2={pad.left} y2={pad.top + chartH} stroke="var(--chart-axis)" />
+
+            {/* y labels */}
+            {[...Array(5)].map((_, i) => {
+              const v = Math.round(maxV - (i / 4) * maxV);
+              const y = pad.top + (i / 4) * chartH;
+              return (
+                <text key={i} x={pad.left - 8} y={y + 4} textAnchor="end" fontSize="10" fill="var(--chart-text)">
+                  {fmtDur(v)}
+                </text>
+              );
+            })}
+
+            {/* bars */}
+            {(() => {
+              const n = Math.max(1, bars.length);
+              const gap = 6;
+              const barW = Math.max(6, Math.min(18, (chartW - gap * (n - 1)) / n));
+              const usedW = barW * n + gap * (n - 1);
+              const x0 = pad.left + Math.max(0, (chartW - usedW) / 2);
+              const baseY = pad.top + chartH;
+              return bars.map((d, i) => {
+                const v = Math.max(0, Number(d.v || 0));
+                const h = (v / maxV) * chartH;
+                const x = x0 + i * (barW + gap);
+                const y = baseY - h;
+                return (
+                  <g key={d.t || i}>
+                    <rect x={x} y={y} width={barW} height={h} rx="10" fill="url(#upBar)" filter="url(#barGlow)" opacity="0.9" />
+                    <rect x={x} y={y} width={barW} height={Math.min(h, 26)} rx="10" fill="url(#upGlow)" opacity="0.9" />
+                  </g>
+                );
+              });
+            })()}
+
+            {/* x labels (sparse) */}
+            {bars.filter((_, i) => i === 0 || i === Math.floor(bars.length / 2) || i === bars.length - 1).map((d, idx) => {
+              const n = Math.max(1, bars.length);
+              const gap = 6;
+              const barW = Math.max(6, Math.min(18, (chartW - gap * (n - 1)) / n));
+              const usedW = barW * n + gap * (n - 1);
+              const x0 = pad.left + Math.max(0, (chartW - usedW) / 2);
+              const i = idx === 0 ? 0 : (idx === 1 ? Math.floor(bars.length / 2) : bars.length - 1);
+              const x = x0 + i * (barW + gap) + barW / 2;
+              const label = new Date(d.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              return (
+                <text key={d.t || idx} x={x} y={height - 10} textAnchor="middle" fontSize="10" fill="var(--chart-text)">
+                  {label}
+                </text>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      <div style={{ background: "var(--bg-card)", borderRadius: 16, padding: 18, border: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 800 }}>Logs</div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Recent system events (this session)</div>
+        </div>
+        <div className="table-wrap">
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>Time</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>Event</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(logs || []).slice().reverse().slice(0, 30).map((l, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                  <td style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-dim)", fontFamily: "'Space Mono', monospace" }}>
+                    {new Date(l.t).toLocaleTimeString()}
+                  </td>
+                  <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600 }}>{l.msg}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SimpleTwoLineChart({ data }) {
+  // Keep a single source of truth for line colors so the fade fill always matches.
+  // (SVG gradient stops don't reliably resolve CSS variables across browsers.)
+  const SALES_COLOR = "#6366f1";
+  const PURCH_COLOR = "#22c55e";
+  const width = 800;
+  const height = 280;
+  // Slightly larger padding so thick strokes/glow stay inside the frame.
+  const pad = { top: 22, right: 22, bottom: 30, left: 60 };
+  const chartW = width - pad.left - pad.right;
+  const chartH = height - pad.top - pad.bottom;
+  const maxY = Math.max(1, ...data.map(d => Math.max(0, Number(d.sales || 0), Number(d.purchases || 0))));
+  const labelEvery = data.length <= 8 ? 1 : data.length <= 12 ? 2 : 3;
+  const ticks = 4;
+
+  const pointsFor = (key) => data.map((d, i) => {
+    const x = pad.left + (i / Math.max(1, data.length - 1)) * chartW;
+    const v = Math.max(0, Number(d[key] || 0));
+    const yy = pad.top + (1 - v / maxY) * chartH;
+    const y = Math.max(pad.top, Math.min(pad.top + chartH, yy));
+    return [x, y];
+  });
+
+  const salesPts = pointsFor("sales");
+  const purchPts = pointsFor("purchases");
+  const mkSmoothPath = (pts, tension = 0.18) => {
+    if (!pts || pts.length === 0) return "";
+    if (pts.length === 1) return `M${pts[0][0].toFixed(2)},${pts[0][1].toFixed(2)}`;
+    const t = Math.max(0, Math.min(0.5, tension));
+    const yMin = pad.top;
+    const yMax = pad.top + chartH;
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const c = (p0, p1, p2, p3) => {
+      const x1 = p1[0] + (p2[0] - p0[0]) * t;
+      const y1 = clamp(p1[1] + (p2[1] - p0[1]) * t, yMin, yMax);
+      const x2 = p2[0] - (p3[0] - p1[0]) * t;
+      const y2 = clamp(p2[1] - (p3[1] - p1[1]) * t, yMin, yMax);
+      return [x1, y1, x2, y2];
+    };
+    let d = `M${pts[0][0].toFixed(2)},${pts[0][1].toFixed(2)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
+      const [x1, y1, x2, y2] = c(p0, p1, p2, p3);
+      d += ` C${x1.toFixed(2)},${y1.toFixed(2)} ${x2.toFixed(2)},${y2.toFixed(2)} ${p2[0].toFixed(2)},${p2[1].toFixed(2)}`;
+    }
+    return d;
+  };
+  const salesPath = mkSmoothPath(salesPts, 0.18);
+  const purchPath = mkSmoothPath(purchPts, 0.18);
+  const baseY = pad.top + chartH;
+  const mkAreaPath = (linePath, pts) => {
+    if (!linePath || !pts || pts.length < 2) return "";
+    const last = pts[pts.length - 1];
+    const first = pts[0];
+    return `${linePath} L${last[0].toFixed(2)},${baseY.toFixed(2)} L${first[0].toFixed(2)},${baseY.toFixed(2)} Z`;
+  };
+  const salesArea = mkAreaPath(salesPath, salesPts);
+  const purchArea = mkAreaPath(purchPath, purchPts);
+
+  return (
+    <div style={{ width: "100%", padding: 6 }}>
+      <div style={{ width: "100%", overflow: "hidden", aspectRatio: `${width} / ${height}`, minHeight: 220 }}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          width="100%"
+          height="100%"
+          preserveAspectRatio="xMidYMid meet"
+          style={{ overflow: "hidden", display: "block" }}
+        >
+          <defs>
+          <linearGradient id="salesGlow" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={SALES_COLOR} stopOpacity="0.14" />
+            <stop offset="100%" stopColor={SALES_COLOR} stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="purchGlow" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={PURCH_COLOR} stopOpacity="0.12" />
+            <stop offset="100%" stopColor={PURCH_COLOR} stopOpacity="0" />
+          </linearGradient>
+          <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feColorMatrix
+              in="blur"
+              type="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.8 0"
+              result="glow"
+            />
+            <feMerge>
+              <feMergeNode in="glow" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          </defs>
+
+          {/* Soft gradient fills under lines */}
+          {salesArea && <path d={salesArea} fill="url(#salesGlow)" stroke="none" />}
+          {purchArea && <path d={purchArea} fill="url(#purchGlow)" stroke="none" />}
+
+          {[...Array(ticks + 1)].map((_, i) => {
+            const y = pad.top + (i / ticks) * chartH;
+            return <line key={i} x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="var(--chart-grid)" strokeWidth="1" />;
+          })}
+
+          <line x1={pad.left} y1={pad.top + chartH} x2={width - pad.right} y2={pad.top + chartH} stroke="var(--chart-axis)" />
+          <line x1={pad.left} y1={pad.top} x2={pad.left} y2={pad.top + chartH} stroke="var(--chart-axis)" />
+
+          {[...Array(ticks + 1)].map((_, i) => {
+            const val = Math.max(0, Math.round(maxY - (i / ticks) * maxY));
+            const y = pad.top + (i / ticks) * chartH;
+            return (
+              <text key={i} x={pad.left - 8} y={y + 4} textAnchor="end" fontSize="10" fill="var(--chart-text)">
+                {fmt(val)}
+              </text>
+            );
+          })}
+
+          {data.filter((_, i) => i % labelEvery === 0).map((d, idx) => {
+            const i = idx * labelEvery;
+            const x = pad.left + (i / Math.max(1, data.length - 1)) * chartW;
+            return (
+              <text key={d.date + i} x={x} y={height - 8} textAnchor="middle" fontSize="10" fill="var(--chart-text)">
+                {d.date}
+              </text>
+            );
+          })}
+
+          <path d={salesPath} fill="none" stroke={SALES_COLOR} strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" opacity="0.16" filter="url(#softGlow)" />
+          <path
+            d={salesPath}
+            fill="none"
+            stroke={SALES_COLOR}
+            strokeWidth="3.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            pathLength="100"
+            strokeDasharray="100"
+            strokeDashoffset="100"
+            style={{ animation: "chartDraw 2.6s cubic-bezier(0.22, 1, 0.36, 1) forwards" }}
+          />
+          <path d={purchPath} fill="none" stroke={PURCH_COLOR} strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" opacity="0.14" filter="url(#softGlow)" />
+          <path
+            d={purchPath}
+            fill="none"
+            stroke={PURCH_COLOR}
+            strokeWidth="3.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            pathLength="100"
+            strokeDasharray="100"
+            strokeDashoffset="100"
+            style={{ animation: "chartDraw 2.6s cubic-bezier(0.22, 1, 0.36, 1) 0.16s forwards" }}
+          />
+        </svg>
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, fontSize: 12, color: "var(--text-dim)", flexWrap: "wrap" }}>
+        <span style={{
+          display: "inline-flex", alignItems: "center", gap: 8,
+          padding: "6px 10px", borderRadius: 999,
+          border: "1px solid rgba(99,102,241,0.28)",
+          background: "rgba(99,102,241,0.10)",
+          color: "var(--text)",
+          fontWeight: 800,
+        }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6366f1", display: "inline-block", boxShadow: "0 0 0 4px rgba(99,102,241,0.12)" }} />
+          Sales
+        </span>
+        <span style={{
+          display: "inline-flex", alignItems: "center", gap: 8,
+          padding: "6px 10px", borderRadius: 999,
+          border: "1px solid rgba(34,197,94,0.28)",
+          background: "rgba(34,197,94,0.10)",
+          color: "var(--text)",
+          fontWeight: 800,
+        }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#22c55e", display: "inline-block", boxShadow: "0 0 0 4px rgba(34,197,94,0.12)" }} />
+          Purchases
+        </span>
+        <span className="hide-sm" style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)", opacity: 0.85 }}>
+          Blue line = <strong>Sales</strong>, Green line = <strong>Purchases</strong>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SimpleScatterCorrelation({ data, xKey, yKey, xLabel, yLabel, dotColor = "rgba(99,102,241,0.9)" }) {
+  const width = 360;
+  const height = 200;
+  const pad = { top: 16, right: 12, bottom: 28, left: 44 };
+  const pts = (Array.isArray(data) ? data : [])
+    .map((d) => [Number(d?.[xKey] ?? 0), Number(d?.[yKey] ?? 0)])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const minX = Math.min(...xs, 0);
+  const maxX = Math.max(...xs, 1);
+  const minY = Math.min(...ys, 0);
+  const maxY = Math.max(...ys, 1);
+
+  const safeRange = (a, b) => (b - a === 0 ? 1 : (b - a));
+  const xRange = safeRange(minX, maxX);
+  const yRange = safeRange(minY, maxY);
+
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const mapX = (x) => pad.left + ((x - minX) / xRange) * plotW;
+  const mapY = (y) => pad.top + (1 - (y - minY) / yRange) * plotH;
+
+  const pearsonR = (() => {
+    if (pts.length < 2) return 0;
+    const n = pts.length;
+    const mean = (arr) => arr.reduce((s, v) => s + v, 0) / n;
+    const mx = mean(xs);
+    const my = mean(ys);
+    let num = 0;
+    let dx = 0;
+    let dy = 0;
+    for (let i = 0; i < n; i++) {
+      const a = xs[i] - mx;
+      const b = ys[i] - my;
+      num += a * b;
+      dx += a * a;
+      dy += b * b;
+    }
+    const den = Math.sqrt(dx * dy);
+    return den === 0 ? 0 : (num / den);
+  })();
+
+  return (
+    <div style={{ width: "100%", height: 200 }}>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
+        <line x1={pad.left} y1={pad.top + plotH} x2={width - pad.right} y2={pad.top + plotH} stroke="var(--chart-axis)" />
+        <line x1={pad.left} y1={pad.top} x2={pad.left} y2={pad.top + plotH} stroke="var(--chart-axis)" />
+        {[0.25, 0.5, 0.75].map((t, i) => (
+          <line key={i} x1={pad.left} y1={pad.top + t * plotH} x2={width - pad.right} y2={pad.top + t * plotH} stroke="var(--chart-grid)" />
+        ))}
+        {pts.slice(0, 220).map(([x, y], i) => (
+          <circle key={i} cx={mapX(x)} cy={mapY(y)} r="3.2" fill={dotColor} opacity="0.85" />
+        ))}
+        <text x={width - pad.right} y={pad.top + 10} textAnchor="end" fontSize="11" fill="var(--chart-text)">
+          r={pearsonR.toFixed(2)}
+        </text>
+        <text x={width / 2} y={height - 8} textAnchor="middle" fontSize="10" fill="var(--chart-text)">{xLabel}</text>
+        <text x={12} y={height / 2} textAnchor="middle" fontSize="10" fill="var(--chart-text)" transform={`rotate(-90 12 ${height / 2})`}>{yLabel}</text>
+      </svg>
+    </div>
+  );
+}
+
+function SimpleDonutChart({ data }) {
+  const size = 160;
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = 52;
+  const stroke = 22;
+  const total = Math.max(1, data.reduce((s, d) => s + Number(d.value || 0), 0));
+  let acc = 0;
+
+  return (
+    <div style={{ width: "100%", height: 160, display: "grid", placeItems: "center" }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--chart-grid)" strokeWidth={stroke} />
+        {data.map((d, i) => {
+          const frac = Number(d.value || 0) / total;
+          const start = (acc / total) * Math.PI * 2 - Math.PI / 2;
+          acc += Number(d.value || 0);
+          const end = (acc / total) * Math.PI * 2 - Math.PI / 2;
+          const x1 = cx + r * Math.cos(start);
+          const y1 = cy + r * Math.sin(start);
+          const x2 = cx + r * Math.cos(end);
+          const y2 = cy + r * Math.sin(end);
+          const large = frac > 0.5 ? 1 : 0;
+          const dPath = `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+          return (
+            <path
+              key={d.name + i}
+              d={dPath}
+              fill="none"
+              stroke={d.color}
+              strokeWidth={stroke}
+              strokeLinecap="butt"
+              pathLength="100"
+              strokeDasharray="100"
+              strokeDashoffset="100"
+              style={{ animation: `chartDraw 3s cubic-bezier(0.22, 1, 0.36, 1) ${i * 0.14}s forwards` }}
+            />
+          );
+        })}
+        <circle cx={cx} cy={cy} r={r - stroke / 2} fill="var(--chart-donut-hole)" />
+      </svg>
+    </div>
+  );
+}
+
+// ─── STOCK IN ───
+function StockInPage({ products, addTransaction, findOrCreateProduct, showToast, updateProductPrice, t, tf, lang, currency }) {
+  const tt = t || ((k) => k);
+  const ttf = tf || ((k, vars = {}) => {
+    let str = tt(k);
+    Object.entries(vars).forEach(([kk, vv]) => { str = str.replaceAll(`{${kk}}`, String(vv)); });
+    return str;
+  });
+  const [name, setName] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [qty, setQty] = useState("");
+  const [unit, setUnit] = useState("kg");
+  const [date, setDate] = useState(today());
+  const [time, setTime] = useState(nowTime());
+  const [multiInput, setMultiInput] = useState("");
+  const [mode, setMode] = useState("single");
+  // Cost calculation mode: "total" = enter total paid, "perUnit" = enter price per unit
+  const [costMode, setCostMode] = useState("total");
+  const [totalPaid, setTotalPaid] = useState("");
+  const [pricePerUnit, setPricePerUnit] = useState("");
+  const [salePricePerUnitInput, setSalePricePerUnitInput] = useState("");
+
+  // Multi-item defaults (optional): applied to each parsed item
+  const [multiCostPerUnitInput, setMultiCostPerUnitInput] = useState("");
+  const [multiSalePerUnitInput, setMultiSalePerUnitInput] = useState("");
+
+  const calcCostPerUnit = costMode === "total"
+    ? (totalPaid && qty ? parseFloat(totalPaid) / parseFloat(qty) : 0)
+    : (pricePerUnit ? parseFloat(pricePerUnit) : 0);
+
+  const calcTotalCost = costMode === "total"
+    ? (totalPaid ? parseFloat(totalPaid) : 0)
+    : (pricePerUnit && qty ? parseFloat(pricePerUnit) * parseFloat(qty) : 0);
+
+  // Values are typed in current display currency. Convert to base before formatting,
+  // because fmtCur() expects base values and applies currency formatting.
+  const calcCostPerUnitBase = toBaseMoney(calcCostPerUnit);
+  const calcTotalCostBase = toBaseMoney(calcTotalCost);
+
+  const handleSelect = (p) => {
+    setSelectedProduct(p);
+    setUnit(p.unit);
+    if (p.costPrice > 0) {
+      setCostMode("perUnit");
+      setPricePerUnit(p.costPrice.toString());
+      setTotalPaid("");
+    }
+  };
+
+  const handleAdd = () => {
+    if (!name || !qty) { showToast(tt("stockIn.error.nameQty"), "error"); return; }
+    if (calcCostPerUnit <= 0) { showToast(tt("stockIn.error.validCost"), "error"); return; }
+    const normalizedUnit = normalizeUnit(unit);
+    const cpp = calcCostPerUnit;
+    const saleVal = parseFloat(salePricePerUnitInput);
+    const salePerInputUnit = Number.isFinite(saleVal) && saleVal > 0 ? saleVal : 0;
+
+    const product = selectedProduct || findOrCreateProduct(name, normalizedUnit, cpp, salePerInputUnit);
+    if (selectedProduct && !isConvertible(normalizedUnit, selectedProduct.unit)) {
+      showToast(ttf("stockIn.error.unitNotCompatible", { unit: normalizedUnit, productUnit: selectedProduct.unit }), "error");
+      return;
+    }
+    // Also update product's stored cost per unit
+    const costPerProductUnit = normalizedUnit === product.unit ? cpp : (convertPricePerUnit(cpp, normalizedUnit, product.unit) ?? cpp);
+    const salePerProductUnit = salePerInputUnit === 0
+      ? null
+      : (normalizedUnit === product.unit ? salePerInputUnit : (convertPricePerUnit(salePerInputUnit, normalizedUnit, product.unit) ?? salePerInputUnit));
+    if (updateProductPrice) updateProductPrice(product.id, costPerProductUnit, salePerProductUnit);
+    const txn = {
+      id: uid(), productId: product.id, productName: name, type: "in",
+      quantity: parseFloat(qty), unit: normalizedUnit, costPrice: cpp,
+      salePrice: 0, profit: 0, date, timestamp: toTimestamp(date, time),
+    };
+    addTransaction(txn);
+    const qtyBase = convertQty(parseFloat(qty), normalizedUnit, product.unit) ?? parseFloat(qty);
+    showToast(ttf("stockIn.success.added", {
+      qty: fmt(parseFloat(qty)),
+      unit: normalizedUnit,
+      name,
+      stockQty: fmt(qtyBase),
+      productUnit: product.unit,
+    }));
+    setName(""); setQty(""); setTotalPaid(""); setPricePerUnit("");
+    setSalePricePerUnitInput(""); setSelectedProduct(null);
+  };
+
+  const handleMultiAdd = () => {
+    const items = parseMultiInput(multiInput);
+    if (items.length === 0) { showToast(tt("stockIn.parseError"), "error"); return; }
+    const hasCostDefault = multiCostPerUnitInput.trim() !== "";
+    const hasSaleDefault = multiSalePerUnitInput.trim() !== "";
+    const defaultCost = parseFloat(multiCostPerUnitInput);
+    const defaultSale = parseFloat(multiSalePerUnitInput);
+    const costPerUnit = hasCostDefault && Number.isFinite(defaultCost) ? defaultCost : 0;
+    const salePerUnit = hasSaleDefault && Number.isFinite(defaultSale) ? defaultSale : 0;
+
+    items.forEach(item => {
+      const parsedCostPerUnit = item.totalPaid && item.qty > 0 ? (item.totalPaid / item.qty) : null;
+      const effectiveCostPerUnit = parsedCostPerUnit ?? (hasCostDefault ? costPerUnit : 0);
+      const product = findOrCreateProduct(item.name, item.unit, effectiveCostPerUnit, hasSaleDefault ? salePerUnit : 0);
+      if (updateProductPrice && product) {
+        if (effectiveCostPerUnit > 0) {
+          const costInProductUnit = item.unit === product.unit ? effectiveCostPerUnit : (convertPricePerUnit(effectiveCostPerUnit, item.unit, product.unit) ?? effectiveCostPerUnit);
+          updateProductPrice(product.id, costInProductUnit, undefined);
+        }
+        if (hasSaleDefault) {
+          const saleInProductUnit = item.unit === product.unit ? salePerUnit : (convertPricePerUnit(salePerUnit, item.unit, product.unit) ?? salePerUnit);
+          updateProductPrice(product.id, undefined, saleInProductUnit);
+        }
+      }
+      addTransaction({
+        id: uid(), productId: product.id, productName: item.name, type: "in",
+        quantity: item.qty, unit: item.unit,
+        costPrice: effectiveCostPerUnit,
+        salePrice: 0, profit: 0,
+        date: today(), timestamp: Date.now(),
+      });
+    });
+    showToast(ttf("stockIn.addedItems", { count: items.length }));
+    setMultiInput("");
+  };
+
+  const inputStyle = { width: "100%", padding: "12px 16px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 15, outline: "none", background: "var(--bg)" };
+  const labelStyle = { fontSize: 13, fontWeight: 600, color: "var(--text-dim)", marginBottom: 8, display: "block" };
+
+  return (
+    <div className="page-centered">
+      <div style={{ display: "flex", gap: 8, marginBottom: 28 }}>
+        <button className="btn" onClick={() => setMode("single")} style={{
+          padding: "10px 24px", fontSize: 14,
+          background: mode === "single" ? "var(--primary)" : "var(--bg-card)",
+          color: mode === "single" ? "#fff" : "var(--text)", border: mode !== "single" ? "1px solid var(--border)" : "none",
+        }}>{tt("stockIn.singleItem")}</button>
+        <button className="btn" onClick={() => setMode("multi")} style={{
+          padding: "10px 24px", fontSize: 14,
+          background: mode === "multi" ? "var(--primary)" : "var(--bg-card)",
+          color: mode === "multi" ? "#fff" : "var(--text)", border: mode !== "multi" ? "1px solid var(--border)" : "none",
+        }}>{tt("stockIn.multiItem")}</button>
+      </div>
+
+      <div className="card-pad" style={{ background: "var(--bg-card)", borderRadius: 20, border: "1px solid var(--border)" }}>
+        {mode === "single" ? (
+          <>
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}>{tt("stockIn.productName")}</label>
+              <AutoInput value={name} onChange={setName} products={products} placeholder={tt("stockIn.startTypingProduct")} onSelect={handleSelect} t={tt} />
+            </div>
+
+            <div className="grid-2" style={{ marginBottom: 20 }}>
+              <div>
+                <label style={labelStyle}>{tt("stockIn.quantity")}</label>
+                <input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>{tt("stockIn.unit")}</label>
+                <select value={unit} onChange={e => setUnit(e.target.value)}
+                  style={{ ...inputStyle, cursor: "pointer" }}>
+                  {UNITS.map(u => <option key={u} value={u}>{unitLabelLang(lang, u)} ({unitFull(u)})</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Cost Mode Toggle */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ ...labelStyle, marginBottom: 10 }}>How do you want to enter cost?</label>
+              <div style={{ display: "flex", gap: 6, background: "var(--bg)", borderRadius: 12, padding: 4, width: "fit-content" }}>
+                <button className="btn" onClick={() => { setCostMode("total"); setPricePerUnit(""); }} style={{
+                  padding: "8px 18px", fontSize: 13, borderRadius: 10,
+                  background: costMode === "total" ? "var(--primary)" : "transparent",
+                  color: costMode === "total" ? "#fff" : "var(--text-dim)",
+                }}>I paid total amount</button>
+                <button className="btn" onClick={() => { setCostMode("perUnit"); setTotalPaid(""); }} style={{
+                  padding: "8px 18px", fontSize: 13, borderRadius: 10,
+                  background: costMode === "perUnit" ? "var(--primary)" : "transparent",
+                  color: costMode === "perUnit" ? "#fff" : "var(--text-dim)",
+                }}>I know price per {unit}</button>
+              </div>
+            </div>
+
+            {costMode === "total" ? (
+              <div style={{ marginBottom: 20 }}>
+                <label style={labelStyle}>Total Amount Paid ({currency || "RWF"})</label>
+                <input type="number" step="0.01" value={totalPaid} onChange={e => setTotalPaid(e.target.value)}
+                  placeholder="e.g. 1200 for the whole batch" style={{ ...inputStyle, fontSize: 18, fontWeight: 600, fontFamily: "'Space Mono', monospace" }} />
+              </div>
+            ) : (
+              <div style={{ marginBottom: 20 }}>
+                <label style={labelStyle}>Price per {unit} ({currency || "RWF"})</label>
+                <input type="number" step="0.01" value={pricePerUnit} onChange={e => setPricePerUnit(e.target.value)}
+                  placeholder={`e.g. 1.50 per ${unit}`} style={{ ...inputStyle, fontSize: 18, fontWeight: 600, fontFamily: "'Space Mono', monospace" }} />
+              </div>
+            )}
+
+            <div style={{ marginBottom: 18 }}>
+              <label style={labelStyle}>Sale price per {unit} ({currency || "RWF"}/{unit}) (optional)</label>
+              <input type="number" step="0.01" value={salePricePerUnitInput} onChange={e => setSalePricePerUnitInput(e.target.value)}
+                placeholder={`e.g. 2.99 ${currency || "RWF"} per ${unit} (optional)`} style={{ ...inputStyle, fontSize: 18, fontWeight: 600, fontFamily: "'Space Mono', monospace" }} />
+            </div>
+
+            {/* ─── LIVE COST BREAKDOWN ─── */}
+            {qty && (calcCostPerUnit > 0 || calcTotalCost > 0) && (
+              <div style={{
+                padding: "20px 24px", borderRadius: 16, marginBottom: 24,
+                background: "linear-gradient(135deg, rgba(99,102,241,0.14), rgba(59,130,246,0.10))",
+                border: "1px solid rgba(99,102,241,0.28)",
+                boxShadow: "0 12px 28px rgba(2,6,23,0.12)",
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--primary)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>
+                  Auto-Calculated Breakdown
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 4, fontWeight: 500 }}>Quantity</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--text)" }}>
+                      {qty} <span style={{ fontSize: 13, fontWeight: 400, color: "var(--text-dim)" }}>{unit}</span>
+                    </div>
+                  </div>
+                  <div style={{ borderLeft: "1px solid rgba(148,163,184,0.35)", paddingLeft: 16 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 4, fontWeight: 500 }}>Cost per {unit}</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--primary)" }}>
+                      {fmtCur(calcCostPerUnitBase)}
+                    </div>
+                  </div>
+                  <div style={{ borderLeft: "1px solid rgba(148,163,184,0.35)", paddingLeft: 16 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 4, fontWeight: 500 }}>Total Cost</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--green)" }}>
+                      {fmtCur(calcTotalCostBase)}
+                    </div>
+                  </div>
+                </div>
+                {costMode === "total" && (
+                  <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
+                    {fmtCur(toBaseMoney(parseFloat(totalPaid || 0)))} ÷ {qty} {unit} = <strong style={{ color: "var(--primary)" }}>{fmtCur(calcCostPerUnitBase)}</strong> per {unit}
+                  </div>
+                )}
+                {costMode === "perUnit" && (
+                  <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
+                    {fmtCur(toBaseMoney(parseFloat(pricePerUnit || 0)))} × {qty} {unit} = <strong style={{ color: "#059669" }}>{fmtCur(calcTotalCostBase)}</strong> total
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid-2" style={{ gap: 14, marginBottom: 24 }}>
+              <div>
+                <label style={labelStyle}>{tt("stockIn.enterDate")}</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                  style={{ padding: "12px 16px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 15, outline: "none", background: "var(--bg)" }} />
+              </div>
+              <div>
+                <label style={labelStyle}>{tt("stockIn.enterTime")}</label>
+                <input type="time" value={time} onChange={e => setTime(e.target.value)}
+                  style={{ padding: "12px 16px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 15, outline: "none", background: "var(--bg)" }} />
+              </div>
+            </div>
+            {selectedProduct && (
+              <div style={{ padding: "14px 18px", borderRadius: 12, background: "var(--primary-bg)", marginBottom: 20, fontSize: 13, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontWeight: 700 }}>{selectedProduct.name}</span>
+                <span>Stock: <strong style={{ fontFamily: "'Space Mono', monospace" }}>{selectedProduct.stock} {selectedProduct.unit}</strong></span>
+                <span>Current cost: <strong style={{ fontFamily: "'Space Mono', monospace", color: "var(--primary)" }}>{fmtCur(selectedProduct.costPrice)}/{selectedProduct.unit}</strong></span>
+                {selectedProduct.salePrice > 0 && <span>Sale price: <strong style={{ fontFamily: "'Space Mono', monospace", color: "var(--green)" }}>{fmtCur(selectedProduct.salePrice)}/{selectedProduct.unit}</strong></span>}
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={handleAdd}
+              style={{ padding: "14px 40px", fontSize: 16, display: "flex", alignItems: "center", gap: 10 }}>
+              {Icons.plus} {tt("stockIn.addStock")}
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-dim)", marginBottom: 8, display: "block" }}>
+                {tt("stockIn.enterMultiple")} <span style={{ fontFamily: "'Space Mono', monospace", color: "var(--primary)" }}>{`Potato 10kg ${currency || "RWF"} 300, Maize 30kg ${currency || "RWF"} 300`}</span>)
+              </label>
+              <textarea
+                value={multiInput} onChange={e => setMultiInput(e.target.value)}
+                placeholder={tt("stockIn.multiPlaceholder")}
+                rows={4}
+                style={{
+                  width: "100%", padding: "16px", borderRadius: 12, border: "2px solid var(--border)",
+                  fontSize: 15, outline: "none", background: "var(--bg)", resize: "vertical", fontFamily: "inherit",
+                }}
+              />
+            </div>
+
+            <div className="grid-2" style={{ gap: 14, marginBottom: 18 }}>
+              <div>
+                <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
+                  {Icons.stockIn} {tt("stockIn.defaultCost")}
+                </label>
+                <input type="number" step="0.01" value={multiCostPerUnitInput} onChange={e => setMultiCostPerUnitInput(e.target.value)}
+                  placeholder="e.g. 1.50 per kg" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8 }}>
+                  {Icons.stockOut} {tt("stockIn.defaultSale")}
+                </label>
+                <input type="number" step="0.01" value={multiSalePerUnitInput} onChange={e => setMultiSalePerUnitInput(e.target.value)}
+                  placeholder="e.g. 2.99 per kg" style={inputStyle} />
+              </div>
+            </div>
+            {multiInput && parseMultiInput(multiInput).length > 0 && (
+              <div style={{ marginBottom: 20, padding: 16, borderRadius: 12, background: "var(--primary-bg)" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--primary)", marginBottom: 8 }}>{tt("stockIn.preview")}</div>
+                {parseMultiInput(multiInput).map((item, i) => (
+                  <div key={i} style={{ fontSize: 14, marginBottom: 4 }}>
+                    {Icons.check} <strong>{item.name}</strong> — {item.qty} {unitLabelLang(lang, item.unit)}{item.totalPaid ? ` • ${currency || "RWF"} ${fmt(item.totalPaid)} ${tt("stockIn.costFromPriceTag")}` : ""}
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={handleMultiAdd}
+              style={{ padding: "14px 40px", fontSize: 16, display: "flex", alignItems: "center", gap: 10 }}>
+              {Icons.plus} {tt("stockIn.addAllItems")}
+            </button>
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-dim)" }}>
+              {tt("stockIn.timestampAuto")}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Quick Templates */}
+      <div style={{ background: "var(--bg-card)", borderRadius: 16, padding: 24, border: "1px solid var(--border)", marginTop: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{tt("stockIn.quickTemplates")}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {["Rice 100kg", "Sugar 50kg", "Oil 20liters", "Flour 50kg", "Beans 30kg", "Milk 20liters"].map(t => (
+            <button key={t} className="btn btn-outline" onClick={() => { setMode("multi"); setMultiInput(t); }}
+              style={{ padding: "8px 16px", fontSize: 13 }}>{t}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── STOCK OUT / SELL ───
+function StockOutPage({ products, addTransaction, showToast, updateProductPrice, t, tf, lang, currency }) {
+  const tt = t || ((k) => k);
+  const ttf = tf || ((k, vars = {}) => {
+    let str = tt(k);
+    Object.entries(vars).forEach(([kk, vv]) => { str = str.replaceAll(`{${kk}}`, String(vv)); });
+    return str;
+  });
+  const [name, setName] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [qty, setQty] = useState("");
+  const [date, setDate] = useState(today());
+  const [time, setTime] = useState(nowTime());
+  // Sale price mode: "perUnit" = price per kg/liter/piece, "total" = total received
+  const [saleMode, setSaleMode] = useState("perUnit");
+  const [salePricePerUnit, setSalePricePerUnit] = useState("");
+  const [totalReceived, setTotalReceived] = useState("");
+  const [sellUnit, setSellUnit] = useState("piece");
+  const prevSellUnitRef = useRef("piece");
+
+  const unitLabel = selectedProduct ? unitLabelLang(lang, sellUnit) : tt("stockIn.unit").toLowerCase();
+
+  const handleSelect = (p) => {
+    setSelectedProduct(p);
+    setSellUnit(p.unit);
+    if (p.salePrice > 0) {
+      setSaleMode("perUnit");
+      setSalePricePerUnit((convertPricePerUnit(p.salePrice, p.unit, p.unit) ?? p.salePrice).toString());
+      setTotalReceived("");
+    }
+  };
+
+  const qtyNum = parseFloat(qty) || 0;
+  const qtyInProductUnit = selectedProduct ? (convertQty(qtyNum, sellUnit, selectedProduct.unit) ?? 0) : 0;
+  const costPerUnit = selectedProduct ? (convertPricePerUnit(selectedProduct.costPrice || 0, selectedProduct.unit, sellUnit) ?? 0) : 0;
+
+  useEffect(() => {
+    const prevUnit = prevSellUnitRef.current;
+    if (selectedProduct && saleMode === "perUnit" && salePricePerUnit && prevUnit !== sellUnit) {
+      const converted = convertPricePerUnit(parseFloat(salePricePerUnit) || 0, prevUnit, sellUnit);
+      if (converted !== null) {
+        const neat = Number.isFinite(converted) ? String(Number(converted.toFixed(6))) : salePricePerUnit;
+        setSalePricePerUnit(neat);
+      }
+    }
+    prevSellUnitRef.current = sellUnit;
+  }, [sellUnit, selectedProduct, saleMode, salePricePerUnit]);
+
+  // Calculate sale price per unit based on mode
+  const calcSalePricePerUnit = saleMode === "perUnit"
+    ? (parseFloat(salePricePerUnit) || 0)
+    : (totalReceived && qtyNum > 0 ? parseFloat(totalReceived) / qtyNum : 0);
+
+  const calcTotalSale = saleMode === "perUnit"
+    ? ((parseFloat(salePricePerUnit) || 0) * qtyNum)
+    : (parseFloat(totalReceived) || 0);
+
+  const totalCostAmount = costPerUnit * qtyNum;
+  // Values typed here are in the selected display currency. Convert to base before formatting/calculations,
+  // because product prices and analytics are stored in base.
+  const salePerUnitBase = toBaseMoney(calcSalePricePerUnit);
+  const totalSaleBase = saleMode === "total"
+    ? toBaseMoney(parseFloat(totalReceived) || 0)
+    : (salePerUnitBase * qtyNum);
+  const profitBase = totalSaleBase - totalCostAmount;
+  const marginPct = totalSaleBase > 0 ? (profitBase / totalSaleBase) * 100 : 0;
+
+  const handleSell = () => {
+    if (!selectedProduct) { showToast(tt("stockOut.error.selectProduct"), "error"); return; }
+    if (!qty || qtyNum <= 0) { showToast(tt("stockOut.error.enterQuantity"), "error"); return; }
+    if (calcSalePricePerUnit <= 0) { showToast(tt("stockOut.error.validSalePrice"), "error"); return; }
+    if (!isConvertible(sellUnit, selectedProduct.unit)) { showToast(tt("stockOut.error.unitNotCompatible"), "error"); return; }
+    if (qtyInProductUnit > selectedProduct.stock) { showToast(tt("stockOut.error.notEnoughStock"), "error"); return; }
+    const sppu = calcSalePricePerUnit;
+    // Save the sale price per unit to the product for next time
+    const salePriceInProductUnitDisplay = convertPricePerUnit(sppu, sellUnit, selectedProduct.unit) ?? sppu;
+    const salePriceInProductUnitBase = toBaseMoney(salePriceInProductUnitDisplay);
+    if (updateProductPrice) updateProductPrice(selectedProduct.id, null, salePriceInProductUnitBase);
+    const txn = {
+      id: uid(), productId: selectedProduct.id, productName: selectedProduct.name, type: "out",
+      quantity: qtyNum, unit: sellUnit,
+      costPrice: costPerUnit, salePrice: toBaseMoney(sppu),
+      profit: profitBase,
+      date, timestamp: toTimestamp(date, time),
+    };
+    addTransaction(txn);
+    const remaining = selectedProduct.stock - qtyInProductUnit;
+    showToast(ttf("stockOut.success.sold", {
+      qty,
+      unit: sellUnit,
+      name: selectedProduct.name,
+      remaining: fmt(remaining),
+      productUnit: selectedProduct.unit,
+    }));
+    setName(""); setQty(""); setSalePricePerUnit(""); setTotalReceived(""); setSelectedProduct(null);
+  };
+
+  const inputStyle = { width: "100%", padding: "12px 16px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 15, outline: "none", background: "var(--bg)" };
+  const labelStyle = { fontSize: 13, fontWeight: 600, color: "var(--text-dim)", marginBottom: 8, display: "block" };
+
+  return (
+    <div className="page-centered">
+      <div className="card-pad" style={{ background: "var(--bg-card)", borderRadius: 20, border: "1px solid var(--border)" }}>
+        {/* Product Name */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>{tt("stockIn.productName")}</label>
+          <AutoInput value={name} onChange={setName} products={products} placeholder={tt("stockOut.startTyping")} onSelect={handleSelect} t={tt} />
+        </div>
+
+        {/* Product info banner */}
+        {selectedProduct && (
+          <div style={{
+            padding: "16px 20px", borderRadius: 14, background: "var(--primary-bg)", marginBottom: 20,
+            border: "1px solid #c7d2fe", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "center",
+          }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>{tt("stockOut.inStock")}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: selectedProduct.stock < 20 ? "#dc2626" : "var(--text)" }}>
+                {selectedProduct.stock} <span style={{ fontSize: 12, fontWeight: 400, color: "var(--text-dim)" }}>{selectedProduct.unit}</span>
+              </div>
+            </div>
+            <div style={{ width: 1, height: 36, background: "#c7d2fe" }} />
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>{tt("stockOut.costPrice")}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--primary)" }}>
+                {fmtCur(costPerUnit)} <span style={{ fontSize: 12, fontWeight: 400, color: "var(--text-dim)" }}>/{selectedProduct.unit}</span>
+              </div>
+            </div>
+            <div style={{ width: 1, height: 36, background: "#c7d2fe" }} />
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>{tt("stockOut.lastSalePrice")}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--green)" }}>
+                {selectedProduct.salePrice > 0 ? fmtCur(selectedProduct.salePrice) : "—"} <span style={{ fontSize: 12, fontWeight: 400, color: "var(--text-dim)" }}>/{selectedProduct.unit}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Quantity */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>{tt("stockIn.quantity")} ({unitLabel})</label>
+          <div className="grid-qty">
+            <input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0"
+              style={{ ...inputStyle, fontSize: 18, fontWeight: 600, fontFamily: "'Space Mono', monospace" }} />
+            <select value={sellUnit} onChange={e => setSellUnit(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }} disabled={!selectedProduct}>
+              {(selectedProduct ? unitsFor(selectedProduct.unit) : UNITS).map(u => <option key={u} value={u}>{unitLabelLang(lang, u)} ({unitFull(u)})</option>)}
+            </select>
+          </div>
+          {selectedProduct && sellUnit !== selectedProduct.unit && qtyNum > 0 && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-dim)" }}>
+              {fmt(qtyNum)} {sellUnit} = <strong style={{ color: "var(--primary)" }}>{fmt(qtyInProductUnit)} {selectedProduct.unit}</strong>
+            </div>
+          )}
+        </div>
+
+        {/* Sale Price Mode Toggle */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ ...labelStyle, marginBottom: 10 }}>{tt("stockOut.howEnterSalePrice")}</label>
+          <div style={{ display: "flex", gap: 6, background: "var(--bg)", borderRadius: 12, padding: 4, width: "fit-content" }}>
+            <button className="btn" onClick={() => { setSaleMode("perUnit"); setTotalReceived(""); }} style={{
+              padding: "8px 18px", fontSize: 13, borderRadius: 10,
+              background: saleMode === "perUnit" ? "var(--primary)" : "transparent",
+              color: saleMode === "perUnit" ? "#fff" : "var(--text-dim)",
+            }}>{ttf("stockOut.pricePer", { unit: unitLabel })}</button>
+            <button className="btn" onClick={() => { setSaleMode("total"); setSalePricePerUnit(""); }} style={{
+              padding: "8px 18px", fontSize: 13, borderRadius: 10,
+              background: saleMode === "total" ? "var(--primary)" : "transparent",
+              color: saleMode === "total" ? "#fff" : "var(--text-dim)",
+            }}>{tt("stockOut.totalReceived")}</button>
+          </div>
+        </div>
+
+        {/* Sale Price Input */}
+        {saleMode === "perUnit" ? (
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Sale price per {unitLabel} ({currency || "RWF"})</label>
+            <input type="number" step="0.01" value={salePricePerUnit} onChange={e => setSalePricePerUnit(e.target.value)}
+              placeholder={`e.g. ${(selectedProduct ? (selectedProduct.salePrice || selectedProduct.costPrice * 1.3) : 0).toFixed(2)} ${currency || "RWF"} per ${unitLabel}`}
+              style={{ ...inputStyle, fontSize: 18, fontWeight: 600, fontFamily: "'Space Mono', monospace" }} />
+          </div>
+        ) : (
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Total amount received ({currency || "RWF"})</label>
+            <input type="number" step="0.01" value={totalReceived} onChange={e => setTotalReceived(e.target.value)}
+              placeholder={`e.g. 5000 ${currency || "RWF"} total for the batch`}
+              style={{ ...inputStyle, fontSize: 18, fontWeight: 600, fontFamily: "'Space Mono', monospace" }} />
+          </div>
+        )}
+
+        {/* ─── LIVE CALCULATION BREAKDOWN ─── */}
+        {selectedProduct && qtyNum > 0 && calcSalePricePerUnit > 0 && (
+          <div style={{
+            borderRadius: 16, marginBottom: 24, overflow: "hidden",
+            border: `1px solid ${profitBase >= 0 ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
+            boxShadow: "0 14px 34px rgba(2,6,23,0.14)",
+          }}>
+            {/* Calculation formula bar */}
+            <div style={{
+              padding: "12px 20px", fontSize: 13, fontFamily: "'Space Mono', monospace",
+              background: profitBase >= 0 ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.10)",
+              color: "var(--text-dim)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+            }}>
+              {saleMode === "total" && (
+                <span style={{ marginRight: 8, fontSize: 12, color: "var(--primary)" }}>
+                  {fmtCur(toBaseMoney(parseFloat(totalReceived || 0)))} ÷ {qty} {unitLabel} = {fmtCur(salePerUnitBase)}/{unitLabel}
+                  <span style={{ margin: "0 8px", color: "var(--text-dim)" }}>→</span>
+                </span>
+              )}
+              <span>({fmtCur(salePerUnitBase)} − {fmtCur(costPerUnit)})</span>
+              <span>×</span>
+              <span>{qty} {unitLabel}</span>
+              <span>=</span>
+              <strong style={{ color: profitBase >= 0 ? "var(--green)" : "var(--red)" }}>{fmtCur(profitBase)}</strong>
+            </div>
+
+            {/* Results grid */}
+            <div style={{
+              padding: "20px 24px",
+              background: profitBase >= 0
+                ? "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(16,185,129,0.08))"
+                : "linear-gradient(135deg, rgba(239,68,68,0.10), rgba(244,63,94,0.08))",
+              display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16,
+            }}>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 4, fontWeight: 500, textTransform: "uppercase", letterSpacing: 0.5 }}>Total Sale</div>
+                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--blue)" }}>
+                  {fmtCur(totalSaleBase)}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>{fmtCur(salePerUnitBase)} × {qty}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 4, fontWeight: 500, textTransform: "uppercase", letterSpacing: 0.5 }}>Total Cost</div>
+                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--orange)" }}>
+                  {fmtCur(totalCostAmount)}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>{fmtCur(costPerUnit)} × {qty}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 4, fontWeight: 500, textTransform: "uppercase", letterSpacing: 0.5 }}>Profit</div>
+                <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: profitBase >= 0 ? "var(--green)" : "var(--red)" }}>
+                  {fmtCur(profitBase)}
+                </div>
+                <div style={{ fontSize: 11, color: profitBase >= 0 ? "var(--green)" : "var(--red)", marginTop: 2, fontWeight: 600 }}>
+                  {marginPct.toFixed(1)}% margin
+                </div>
+              </div>
+            </div>
+
+            {/* Sale price per unit info when using total mode */}
+            {saleMode === "total" && (
+              <div style={{ padding: "10px 20px", background: profitBase >= 0 ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.08)", fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
+                Sale price per {unitLabel}: <strong style={{ color: "var(--primary)", fontFamily: "'Space Mono', monospace" }}>{fmtCur(salePerUnitBase)}</strong>
+                {" "}(from {fmtCur(toBaseMoney(parseFloat(totalReceived || 0)))} ÷ {qty} {unitLabel})
+              </div>
+            )}
+            {saleMode === "perUnit" && (
+              <div style={{ padding: "10px 20px", background: profitBase >= 0 ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.08)", fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
+                {fmtCur(salePerUnitBase)} × {qty} {unitLabel} = <strong style={{ color: "var(--blue)", fontFamily: "'Space Mono', monospace" }}>{fmtCur(totalSaleBase)}</strong> total received
+              </div>
+            )}
+
+            {/* Warning if selling below cost */}
+            {profitBase < 0 && (
+              <div style={{ padding: "10px 20px", background: "var(--red-bg)", display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--red)", fontWeight: 600 }}>
+                {Icons.alert} Selling below cost — you are losing {fmtCur(Math.abs(profitBase))} on this sale
+              </div>
+            )}
+            {/* Warning if not enough stock */}
+            {qtyInProductUnit > selectedProduct.stock && (
+              <div style={{ padding: "10px 20px", background: "var(--orange-bg)", display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--orange)", fontWeight: 600 }}>
+                {Icons.alert} Only {selectedProduct.stock} {selectedProduct.unit} in stock — not enough
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Date & Time */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
+          <div>
+            <label style={labelStyle}>{tt("stockIn.enterDate")}</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              style={{ padding: "12px 16px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 15, outline: "none", background: "var(--bg)" }} />
+          </div>
+          <div>
+            <label style={labelStyle}>{tt("stockIn.enterTime")}</label>
+            <input type="time" value={time} onChange={e => setTime(e.target.value)}
+              style={{ padding: "12px 16px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 15, outline: "none", background: "var(--bg)" }} />
+          </div>
+        </div>
+
+        <button className="btn btn-primary" onClick={handleSell}
+          style={{ padding: "14px 40px", fontSize: 16, display: "flex", alignItems: "center", gap: 10, opacity: (qtyInProductUnit > (selectedProduct?.stock || 0)) ? 0.5 : 1 }}>
+          {Icons.stockOut} {tt("stockOut.completeSale")}
+        </button>
+      </div>
+
+      {/* Quick Sell */}
+      {products.length > 0 && (
+        <div style={{ background: "var(--bg-card)", borderRadius: 16, padding: 24, border: "1px solid var(--border)", marginTop: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{tt("stockOut.quickSell")}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {[...products].sort((a, b) => (b.frequency || 0) - (a.frequency || 0)).slice(0, 8).map(p => (
+              <button key={p.id} className="btn btn-outline" onClick={() => { setName(p.name); handleSelect(p); }}
+                style={{ padding: "8px 16px", fontSize: 13 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ display: "inline-flex", opacity: 0.85 }}><UnitIcon unit={p.unit} size={16} /></span>
+                  <span>{p.name}</span>
+                </span>{" "}
+                <span style={{ opacity: 0.55, marginLeft: 6, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span>{p.stock}{p.unit}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {products.length === 0 && (
+        <div style={{
+          textAlign: "center", padding: "48px 20px", marginTop: 20,
+          background: "var(--bg-card)", borderRadius: 16, border: "2px dashed var(--border)",
+        }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🛒</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{tt("stockOut.noProducts")}</div>
+          <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
+            {ttf("stockOut.addStockFirst", { addStock: tt("stockIn.addStock") }).split(tt("stockIn.addStock"))[0]}
+            <strong>{tt("stockIn.addStock")}</strong>
+            {ttf("stockOut.addStockFirst", { addStock: tt("stockIn.addStock") }).split(tt("stockIn.addStock")).slice(1).join(tt("stockIn.addStock"))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── INVENTORY ───
+function InventoryPage({ products, updateProductPrice, removeProduct, undoRemoveProduct, hasUndo, showToast, t }) {
+  const tt = t || ((k) => k);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState("name");
+  const [editingId, setEditingId] = useState(null);
+  const [editCost, setEditCost] = useState("");
+  const [editSale, setEditSale] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [displayUnits, setDisplayUnits] = useState({});
+  const [unitOpenId, setUnitOpenId] = useState(null);
+
+  useEffect(() => {
+    const onDocDown = (e) => {
+      try {
+        if (!e?.target?.closest?.(".inv-dd")) setUnitOpenId(null);
+      } catch (_e) {}
+    };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("touchstart", onDocDown, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("touchstart", onDocDown);
+    };
+  }, []);
+
+  const startEdit = (p) => {
+    setEditingId(p.id);
+    setEditCost(p.costPrice.toString());
+    setEditSale(p.salePrice.toString());
+  };
+
+  const saveEdit = (p) => {
+    const newCost = parseFloat(editCost);
+    const newSale = parseFloat(editSale);
+    if (isNaN(newCost) || newCost < 0) { showToast(tt("inventory.error.invalidCostPrice"), "error"); return; }
+    if (isNaN(newSale) || newSale < 0) { showToast(tt("inventory.error.invalidSalePrice"), "error"); return; }
+    updateProductPrice(p.id, toBaseMoney(newCost), toBaseMoney(newSale));
+    setEditingId(null);
+    showToast(tt("inventory.success.updatedPrices")
+      .replace("{name}", p.name)
+      .replace("{cost}", fmtCur(toBaseMoney(newCost)))
+      .replace("{sale}", fmtCur(toBaseMoney(newSale)))
+      .replaceAll("{unit}", p.unit));
+  };
+
+  const cancelEdit = () => { setEditingId(null); };
+
+  const filtered = products
+    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sort === "name") return a.name.localeCompare(b.name);
+      if (sort === "stock") return a.stock - b.stock;
+      if (sort === "value") return (b.stock * b.costPrice) - (a.stock * a.costPrice);
+      return 0;
+    });
+
+  const totalValue = products.reduce((s, p) => s + p.stock * p.costPrice, 0);
+
+  const inlineInput = { padding: "6px 10px", borderRadius: 8, border: "2px solid var(--primary)", fontSize: 14, outline: "none", width: 80, fontFamily: "'Space Mono', monospace", fontWeight: 600, background: "#fff", textAlign: "center" };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 24, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 250 }}>
+          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)" }}>{Icons.search}</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder={tt("common.searchProducts")}
+            style={{ width: "100%", padding: "12px 16px 12px 42px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 14, outline: "none", background: "var(--bg-card)" }} />
+        </div>
+        <select value={sort} onChange={e => setSort(e.target.value)}
+          style={{ padding: "12px 20px", borderRadius: 12, border: "2px solid var(--border)", fontSize: 14, outline: "none", background: "var(--bg-card)", cursor: "pointer" }}>
+          <option value="name">{tt("common.sort.name")}</option>
+          <option value="stock">{tt("common.sort.stock")}</option>
+          <option value="value">{tt("common.sort.value")}</option>
+        </select>
+        <div style={{ padding: "10px 20px", borderRadius: 12, background: "var(--primary-bg)", fontSize: 14, fontWeight: 600, color: "var(--primary)" }}>
+          {tt("common.totalValue")}: {fmtCur(totalValue)}
+        </div>
+        {hasUndo && (
+          <button onClick={undoRemoveProduct} className="btn btn-outline" style={{ padding: "10px 16px", fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
+            {Icons.undo} {tt("common.undoDelete")}
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+        {filtered.map(p => {
+          const viewUnit = displayUnits[p.id] || p.unit;
+          const viewStock = convertQty(p.stock, p.unit, viewUnit) ?? p.stock;
+          const viewCost = convertPricePerUnit(p.costPrice || 0, p.unit, viewUnit) ?? p.costPrice;
+          const viewSale = convertPricePerUnit(p.salePrice || 0, p.unit, viewUnit) ?? p.salePrice;
+          const level = p.stock < 15 ? "low" : p.stock < 50 ? "medium" : "high";
+          const pct = Math.min((p.stock / 200) * 100, 100);
+          const isEditing = editingId === p.id;
+          const margin = p.salePrice > 0 ? ((p.salePrice - p.costPrice) / p.salePrice * 100) : 0;
+          return (
+            <div key={p.id} className="stat-card" style={{
+              background: "var(--bg-card)", borderRadius: 16, padding: 20,
+              border: `2px solid ${isEditing ? "var(--primary)" : level === "low" ? "#fecaca" : level === "medium" ? "#fde68a" : "var(--border)"}`,
+              transition: "border-color 0.2s",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", opacity: 0.9 }}><UnitIcon unit={p.unit} size={18} /></span>
+                    <span>{p.name}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ display: "inline-flex", opacity: 0.7 }}><UnitIcon unit={p.unit} size={14} /></span>
+                      <span>{tt("inventory.base")} {p.unit}</span>
+                    </span>
+                    <div className="glass-dd inv-dd">
+                      <button
+                        type="button"
+                        className="glass-dd-btn"
+                        onClick={() => setUnitOpenId((v) => (v === p.id ? null : p.id))}
+                        aria-haspopup="listbox"
+                        aria-expanded={unitOpenId === p.id ? "true" : "false"}
+                      >
+                        <span className="glass-dd-value">
+                          <span>{viewUnit}</span>
+                          <span className="glass-dd-sub">{unitFull(viewUnit)}</span>
+                        </span>
+                        <span aria-hidden="true" style={{ opacity: 0.9, display: "inline-flex" }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </span>
+                      </button>
+                      {unitOpenId === p.id && (
+                        <div className="glass-dd-list" role="listbox" aria-label="Unit options">
+                          {unitsFor(p.unit).map((u) => (
+                            <button
+                              type="button"
+                              key={u}
+                              className={`glass-dd-item ${viewUnit === u ? "is-active" : ""}`}
+                              onClick={() => { setDisplayUnits(prev => ({ ...prev, [p.id]: u })); setUnitOpenId(null); }}
+                            >
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                                <span style={{ display: "inline-flex", opacity: 0.9 }}><UnitIcon unit={u} size={16} /></span>
+                                <span>{unitLabelLang("en", u) || u}</span>
+                              </span>
+                              <small>{u} • {unitFull(u)}</small>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 170 }}>
+                  <span style={{
+                    padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                    background: level === "low" ? "#fef2f2" : level === "medium" ? "#fffbeb" : "#ecfdf5",
+                    color: STOCK_COLORS[level],
+                  }}>{level === "low" ? tt("common.level.low") : level === "medium" ? tt("common.level.medium") : tt("common.level.good")}</span>
+                  {!isEditing && (
+                    <>
+                      <button onClick={() => startEdit(p)} className="btn" style={{
+                        padding: "4px 8px", background: "var(--bg)", color: "var(--text-dim)", borderRadius: 8,
+                        display: "flex", alignItems: "center", gap: 4, fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap",
+                      }}>{Icons.edit} {tt("inventory.price")}</button>
+                      <button onClick={() => setConfirmDeleteId(p.id)} className="btn" style={{
+                        padding: "4px 8px", background: "var(--red-bg)", color: "var(--red)", borderRadius: 8,
+                        display: "flex", alignItems: "center", gap: 4, fontSize: 11, flex: "0 0 auto",
+                      }}>{Icons.trash}</button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: STOCK_COLORS[level], marginBottom: 12 }}>
+                {fmt(viewStock)} <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-dim)" }}>{viewUnit}</span>
+              </div>
+
+              <div style={{ height: 8, borderRadius: 4, background: "var(--bg)", overflow: "hidden", marginBottom: 14 }}>
+                <div style={{ height: "100%", borderRadius: 4, background: STOCK_COLORS[level], width: `${pct}%`, transition: "width 0.6s ease" }} />
+              </div>
+
+              {isEditing ? (
+                <div style={{ background: "var(--primary-bg)", borderRadius: 12, padding: 16 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Cost per {p.unit}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 12, color: "var(--text-dim)", fontWeight: 700 }}>{window.__zt_currency || "RWF"}</span>
+                        <input type="number" step="0.01" value={editCost} onChange={e => setEditCost(e.target.value)}
+                          style={inlineInput} autoFocus
+                          onKeyDown={e => { if (e.key === "Enter") saveEdit(p); if (e.key === "Escape") cancelEdit(); }} />
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Sale per {p.unit}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 12, color: "var(--text-dim)", fontWeight: 700 }}>{window.__zt_currency || "RWF"}</span>
+                        <input type="number" step="0.01" value={editSale} onChange={e => setEditSale(e.target.value)}
+                          style={inlineInput}
+                          onKeyDown={e => { if (e.key === "Enter") saveEdit(p); if (e.key === "Escape") cancelEdit(); }} />
+                      </div>
+                    </div>
+                  </div>
+                  {editCost && editSale && parseFloat(editSale) > 0 && (
+                    <div style={{ fontSize: 12, color: parseFloat(editSale) > parseFloat(editCost) ? "var(--green)" : "#dc2626", fontWeight: 600, marginBottom: 10 }}>
+                      Margin: {fmtCur(parseFloat(editSale) - parseFloat(editCost))}/{p.unit} ({((parseFloat(editSale) - parseFloat(editCost)) / parseFloat(editSale) * 100).toFixed(1)}%)
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => saveEdit(p)} className="btn btn-primary" style={{ padding: "6px 16px", fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                      {Icons.check} Save
+                    </button>
+                    <button onClick={cancelEdit} className="btn btn-outline" style={{ padding: "6px 16px", fontSize: 12 }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: 12 }}>
+                  <div style={{ background: "var(--bg)", borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+                    <div style={{ color: "var(--text-dim)", marginBottom: 2, fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>Cost</div>
+                    <div style={{ fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "var(--text)" }}>{fmtCur(viewCost)}</div>
+                  </div>
+                  <div style={{ background: "var(--bg)", borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+                    <div style={{ color: "var(--text-dim)", marginBottom: 2, fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>Sale</div>
+                    <div style={{ fontWeight: 700, fontFamily: "'Space Mono', monospace", color: p.salePrice > 0 ? "var(--green)" : "var(--text-dim)" }}>{p.salePrice > 0 ? fmtCur(viewSale) : "—"}</div>
+                  </div>
+                  <div style={{ background: margin > 0 ? "var(--green-bg)" : "var(--bg)", borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+                    <div style={{ color: "var(--text-dim)", marginBottom: 2, fontSize: 10, fontWeight: 600, textTransform: "uppercase" }}>Margin</div>
+                    <div style={{ fontWeight: 700, fontFamily: "'Space Mono', monospace", color: margin > 0 ? "var(--green)" : "var(--text-dim)" }}>{margin > 0 ? `${margin.toFixed(0)}%` : "—"}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Delete confirmation overlay */}
+              {confirmDeleteId === p.id && (
+                <div style={{
+                  marginTop: 14, padding: "16px", borderRadius: 12,
+                  background: "linear-gradient(135deg, #fef2f2, #fee2e2)",
+                  border: "2px solid #fecaca",
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626", marginBottom: 4 }}>
+                    Remove "{p.name}"?
+                  </div>
+                  <div style={{ fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+                    This will permanently delete this product and all its transaction history.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { removeProduct(p.id); setConfirmDeleteId(null); }}
+                      className="btn" style={{
+                        padding: "8px 18px", fontSize: 12, fontWeight: 700,
+                        background: "#dc2626", color: "#fff", borderRadius: 10,
+                        display: "flex", alignItems: "center", gap: 6,
+                      }}>
+                      {Icons.trash} Yes, Remove
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(null)}
+                      className="btn btn-outline" style={{ padding: "8px 18px", fontSize: 12, borderRadius: 10 }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Empty state */}
+      {products.length === 0 && (
+        <div style={{
+          textAlign: "center", padding: "60px 20px",
+          background: "var(--bg-card)", borderRadius: 20, border: "2px dashed var(--border)",
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📦</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>No products yet</div>
+          <div style={{ fontSize: 14, color: "var(--text-dim)", maxWidth: 360, margin: "0 auto", lineHeight: 1.6 }}>
+            Go to <strong>Add Stock</strong> to add your first product. Products are created automatically when you add stock for the first time.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── REPORTS ───
+function ReportsPage({ transactions, products, onImportData, onExportData, showToast, t, lang }) {
+  const tt = t || ((k) => k);
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().split("T")[0]; });
+  const [dateTo, setDateTo] = useState(today());
+  const [filterProduct, setFilterProduct] = useState("");
+  const [filterType, setFilterType] = useState("all");
+
+  const filtered = transactions.filter(t => {
+    if (t.date < dateFrom || t.date > dateTo) return false;
+    if (filterProduct && !t.productName.toLowerCase().includes(filterProduct.toLowerCase())) return false;
+    if (filterType !== "all" && t.type !== filterType) return false;
+    return true;
+  });
+
+  const summary = {
+    totalIn: filtered.filter(t => t.type === "in").reduce((s, t) => s + t.quantity, 0),
+    totalOut: filtered.filter(t => t.type === "out").reduce((s, t) => s + t.quantity, 0),
+    totalCost: filtered.filter(t => t.type === "in").reduce((s, t) => s + t.costPrice * t.quantity, 0),
+    totalRevenue: filtered.filter(t => t.type === "out").reduce((s, t) => s + t.salePrice * t.quantity, 0),
+    totalProfit: filtered.filter(t => t.type === "out").reduce((s, t) => s + t.profit, 0),
+  };
+
+  const fmtTime = (ts) => {
+    try {
+      if (!ts) return "—";
+      const d = new Date(ts);
+      return d.toLocaleTimeString(localeForLang(lang), { hour: "2-digit", minute: "2-digit" });
+    } catch (_e) {
+      return "—";
+    }
+  };
+
+  const exportCSV = () => {
+    const headers = "Product,Type,Quantity,Unit,Cost Price,Sale Price,Profit,Date,Time\n";
+    const rows = filtered.map(t => `${t.productName},${t.type},${t.quantity},${t.unit},${t.costPrice},${t.salePrice},${t.profit},${t.date},${fmtTime(t.timestamp)}`).join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `report_${dateFrom}_${dateTo}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportBackupJSON = () => {
+    const payload = onExportData ? onExportData() : { products, transactions };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `zuritrack_backup_${today()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importBackupJSON = async (file) => {
+    if (!file) return;
+    try {
+      const txt = await file.text();
+      const data = JSON.parse(txt);
+      onImportData?.(data);
+    } catch (_e) {
+      showToast?.(tt("reports.importError"), "error");
+    }
+  };
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{
+        background: "var(--bg-card)", borderRadius: 16, padding: 24, border: "1px solid var(--border)", marginBottom: 24,
+        display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end",
+      }}>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", marginBottom: 6, display: "block" }}>{tt("reports.filters.from")}</label>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            style={{ padding: "10px 14px", borderRadius: 10, border: "2px solid var(--border)", fontSize: 13, outline: "none", background: "var(--bg)" }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", marginBottom: 6, display: "block" }}>{tt("reports.filters.to")}</label>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            style={{ padding: "10px 14px", borderRadius: 10, border: "2px solid var(--border)", fontSize: 13, outline: "none", background: "var(--bg)" }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", marginBottom: 6, display: "block" }}>{tt("reports.filters.product")}</label>
+          <input value={filterProduct} onChange={e => setFilterProduct(e.target.value)} placeholder={tt("reports.filters.allProducts")}
+            style={{ padding: "10px 14px", borderRadius: 10, border: "2px solid var(--border)", fontSize: 13, outline: "none", background: "var(--bg)", width: 160 }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", marginBottom: 6, display: "block" }}>{tt("reports.filters.type")}</label>
+          <select value={filterType} onChange={e => setFilterType(e.target.value)}
+            style={{ padding: "10px 14px", borderRadius: 10, border: "2px solid var(--border)", fontSize: 13, outline: "none", background: "var(--bg)", cursor: "pointer" }}>
+            <option value="all">{tt("reports.type.all")}</option>
+            <option value="in">{tt("reports.type.in")}</option>
+            <option value="out">{tt("reports.type.out")}</option>
+          </select>
+        </div>
+        <button className="btn btn-primary" onClick={exportCSV} style={{ padding: "10px 20px", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+          {Icons.download} {tt("common.exportCSV")}
+        </button>
+        <button className="btn btn-outline" onClick={exportBackupJSON} style={{ padding: "10px 20px", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+          {Icons.download} {tt("common.exportBackup")}
+        </button>
+        <label className="btn btn-outline" style={{ padding: "10px 20px", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+          {tt("common.importBackup")}
+          <input type="file" accept="application/json" style={{ display: "none" }} onChange={e => importBackupJSON(e.target.files?.[0])} />
+        </label>
+      </div>
+
+      {/* Summary Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 24 }}>
+        {[
+          { label: tt("reports.summary.itemsIn"), value: fmt(summary.totalIn), color: "var(--green)", bg: "var(--green-bg)" },
+          { label: tt("reports.summary.itemsOut"), value: fmt(summary.totalOut), color: "var(--blue)", bg: "var(--blue-bg)" },
+          { label: tt("reports.summary.totalCost"), value: fmtCur(summary.totalCost), color: "var(--orange)", bg: "var(--orange-bg)" },
+          { label: tt("reports.summary.revenue"), value: fmtCur(summary.totalRevenue), color: "var(--primary)", bg: "var(--primary-bg)" },
+          { label: tt("reports.summary.profit"), value: fmtCur(summary.totalProfit), color: "var(--green)", bg: "var(--green-bg)" },
+        ].map((c, i) => (
+          <div key={i} style={{ background: "var(--bg-card)", borderRadius: 14, padding: "16px 20px", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 12, color: "var(--text-dim)", fontWeight: 500, marginBottom: 4 }}>{c.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: c.color, fontFamily: "'Space Mono', monospace" }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Transactions Table */}
+      <div style={{ background: "var(--bg-card)", borderRadius: 16, border: "1px solid var(--border)", overflow: "hidden" }}>
+        <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 15, fontWeight: 700 }}>{filtered.length} {tt("reports.transactions")}</span>
+        </div>
+        <div style={{ maxHeight: 500, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--bg)", position: "sticky", top: 0 }}>
+                {[
+                  tt("reports.table.product"),
+                  tt("reports.table.type"),
+                  tt("reports.table.qty"),
+                  tt("reports.table.costUnit"),
+                  tt("reports.table.saleUnit"),
+                  tt("reports.table.total"),
+                  tt("reports.table.profit"),
+                  tt("reports.table.date"),
+                ].map(h => (
+                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>
+                ))}
+                <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>{tt("reports.table.time")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0, 100).map(t => {
+                const perUnit = t.type === "in" ? t.costPrice : t.salePrice;
+                const total = perUnit * t.quantity;
+                return (
+                  <tr key={t.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 500 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ display: "inline-flex", opacity: 0.9 }}><UnitIcon unit={t.unit} size={15} /></span>
+                        <span>{t.productName}</span>
+                      </span>
+                    </td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <span style={{
+                        padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                        background: t.type === "in" ? "var(--green-bg)" : "var(--blue-bg)",
+                        color: t.type === "in" ? "var(--green)" : "var(--blue)",
+                      }}>{t.type === "in" ? tt("reports.badge.in") : tt("reports.badge.sale")}</span>
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontFamily: "'Space Mono', monospace" }}>
+                      {t.quantity} <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{t.unit}</span>
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontFamily: "'Space Mono', monospace" }}>
+                      {fmtCur(t.costPrice)}<span style={{ fontSize: 10, color: "var(--text-dim)" }}>/{t.unit}</span>
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontFamily: "'Space Mono', monospace" }}>
+                      {t.type === "out" ? <>{fmtCur(t.salePrice)}<span style={{ fontSize: 10, color: "var(--text-dim)" }}>/{t.unit}</span></> : "—"}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, fontFamily: "'Space Mono', monospace" }}>
+                      {fmtCur(total)}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 600, fontFamily: "'Space Mono', monospace", color: t.profit > 0 ? "var(--green)" : "var(--text-dim)" }}>
+                      {t.type === "out" ? fmtCur(t.profit) : "—"}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-dim)" }}>{t.date}</td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-dim)" }}>{fmtTime(t.timestamp)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Mount after all declarations so any values are initialized.
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
